@@ -1,0 +1,50 @@
+# ─── Flutter / Dart ───────────────────────────────────────────────────────────
+securechat-app/.dart_tool/
+securechat-app/build/
+securechat-app/.flutter-plugins
+securechat-app/.flutter-plugins-dependencies
+securechat-app/.metadata
+securechat-app/*.log
+securechat-app/.packages
+securechat-app/pubspec.lock
+
+# Generated files
+securechat-app/android/app/src/main/java/io/flutter/plugins/
+securechat-app/android/.gradle/
+securechat-app/android/local.properties
+securechat-app/ios/.symlinks/
+securechat-app/ios/Pods/
+securechat-app/ios/Flutter/Generated.xcconfig
+securechat-app/ios/Flutter/flutter_export_environment.sh
+securechat-app/macos/.symlinks/
+securechat-app/macos/Pods/
+securechat-app/linux/flutter/generated_plugin_registrant.cc
+securechat-app/linux/flutter/generated_plugin_registrant.h
+securechat-app/linux/flutter/generated_plugins.cmake
+securechat-app/windows/flutter/generated_plugin_registrant.cc
+securechat-app/windows/flutter/generated_plugin_registrant.h
+securechat-app/windows/flutter/generated_plugins.cmake
+
+# ─── Go / Server ──────────────────────────────────────────────────────────────
+securechat-server/data.db
+securechat-server/data.db-shm
+securechat-server/data.db-wal
+securechat-server/config.toml
+securechat-server/securechat-server
+securechat-server/securechat-server-linux-amd64
+securechat-server/securechat-server-windows-amd64.exe
+securechat-server/*.exe
+
+# ─── Claude Code ──────────────────────────────────────────────────────────────
+.claude/
+**/.claude/
+
+# ─── Duplicado / carpeta interna ──────────────────────────────────────────────
+SecureChat/
+
+# ─── Sistema / Editores ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.xcf
+.idea/
+*.iml

@@ -1,0 +1,369 @@
+package ws
+
+import (
+	"database/sql"
+	"encoding/json"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/securechat/server/api/handlers"
+	"github.com/securechat/server/config"
+	"github.com/securechat/server/db"
+	"github.com/securechat/server/sfu"
+)
+
+const (
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = 50 * time.Second
+	maxMessageSize = 65536
+	sendBufSize    = 64
+)
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+
+// Client represents a single WebSocket connection.
+type Client struct {
+	userID   string
+	conn     *websocket.Conn
+	send     chan *OutgoingMessage
+	hub      *Hub
+	database *sql.DB
+	cfg      *config.Config
+	sfu      *sfu.SFU
+}
+
+// ServeWS upgrades the HTTP connection and starts the client pump goroutines.
+func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, w http.ResponseWriter, r *http.Request) {
+	// Authenticate via JWT query param
+	tokenStr := r.URL.Query().Get("token")
+	if tokenStr == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := handlers.ValidateJWT(cfg, tokenStr)
+	if err != nil {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade: %v", err)
+		return
+	}
+
+	c := &Client{
+		userID:   userID,
+		conn:     conn,
+		send:     make(chan *OutgoingMessage, sendBufSize),
+		hub:      hub,
+		database: database,
+		cfg:      cfg,
+		sfu:      sfuInst,
+	}
+
+	hub.Register(c)
+	db.UpdateLastSeen(database, userID)
+
+	go c.writePump()
+	go c.readPump()
+
+	// Deliver any queued offline messages
+	go c.deliverOffline()
+}
+
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.Unregister(c)
+		c.conn.Close()
+	}()
+
+	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	for {
+		_, raw, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("ws read error [%s]: %v", c.userID, err)
+			}
+			break
+		}
+		c.handleMessage(raw)
+	}
+}
+
+func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+
+	for {
+		select {
+		case msg, ok := <-c.send:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteJSON(msg); err != nil {
+				log.Printf("ws write error [%s]: %v", c.userID, err)
+				return
+			}
+
+		case <-ticker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *Client) handleMessage(raw []byte) {
+	var msg IncomingMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		c.sendError("invalid_json", "Invalid JSON")
+		return
+	}
+
+	switch msg.Type {
+	case "ping":
+		c.send <- &OutgoingMessage{Type: "pong"}
+
+	case "dm", "noise_init", "noise_resp":
+		c.handleDM(&msg)
+
+	case "room_join":
+		c.handleRoomJoin(&msg)
+
+	case "room_leave":
+		c.handleRoomLeave(&msg)
+
+	case "room_msg":
+		c.handleRoomMsg(&msg)
+
+	case "voice_join":
+		c.handleVoiceJoin(&msg)
+	case "voice_leave":
+		c.handleVoiceLeave(&msg)
+	case "sdp_offer":
+		c.handleSdpOffer(&msg)
+	case "sdp_answer":
+		c.handleSdpAnswer(&msg)
+	case "ice_candidate":
+		c.handleIceCandidate(&msg)
+
+	default:
+		c.sendError("unknown_type", "Unknown message type: "+msg.Type)
+	}
+}
+
+func (c *Client) handleDM(msg *IncomingMessage) {
+	if msg.To == "" || msg.Payload == "" {
+		c.sendError("invalid_dm", "DM requires 'to' and 'payload'")
+		return
+	}
+	if msg.Sig == "" {
+		c.sendError("missing_sig", "DM requires Ed25519 signature")
+		return
+	}
+
+	out := &OutgoingMessage{
+		Type:    msg.Type,
+		From:    c.userID,
+		To:      msg.To,
+		Nonce:   msg.Nonce,
+		Payload: msg.Payload,
+		Sig:     msg.Sig,
+		Seq:     msg.Seq,
+		Ts:      msg.Ts,
+		EPub:    msg.EPub,
+	}
+
+	delivered := c.hub.Send(msg.To, out)
+
+	if !delivered {
+		// Store for offline delivery (72h TTL)
+		now := time.Now().Unix()
+		_ = db.SaveOfflineMessage(c.database, &db.OfflineMsg{
+			RecipientID: msg.To,
+			MsgType:     msg.Type,
+			FromID:      c.userID,
+			Payload:     msg.Payload,
+			Nonce:       msg.Nonce,
+			Sig:         msg.Sig,
+			Seq:         msg.Seq,
+			EPub:        msg.EPub,
+			CreatedAt:   now,
+			ExpiresAt:   now + int64(c.cfg.Limits.OfflineTTLHours)*3600,
+		})
+	}
+
+	// Ack to sender
+	if msg.Seq > 0 {
+		c.send <- &OutgoingMessage{Type: "delivered", DeliveredSeq: msg.Seq}
+	}
+}
+
+func (c *Client) deliverOffline() {
+	msgs, err := db.GetOfflineMessages(c.database, c.userID)
+	if err != nil {
+		log.Printf("offline delivery error [%s]: %v", c.userID, err)
+		return
+	}
+	for _, m := range msgs {
+		c.send <- &OutgoingMessage{
+			Type:    m.MsgType,
+			From:    m.FromID,
+			To:      c.userID,
+			Payload: m.Payload,
+			Nonce:   m.Nonce,
+			Sig:     m.Sig,
+			Seq:     m.Seq,
+			EPub:    m.EPub,
+		}
+	}
+	if len(msgs) > 0 {
+		_ = db.DeleteOfflineMessages(c.database, c.userID)
+	}
+}
+
+func (c *Client) handleRoomJoin(msg *IncomingMessage) {
+	if msg.RoomID == "" {
+		c.sendError("invalid_room_join", "room_id required")
+		return
+	}
+	exists, err := db.RoomExists(c.database, msg.RoomID)
+	if err != nil || !exists {
+		c.sendError("room_not_found", "Room does not exist")
+		return
+	}
+	c.hub.JoinRoom(msg.RoomID, c)
+	c.send <- &OutgoingMessage{Type: "room_joined", RoomID: msg.RoomID}
+}
+
+func (c *Client) handleRoomLeave(msg *IncomingMessage) {
+	if msg.RoomID == "" {
+		return
+	}
+	c.hub.LeaveRoom(msg.RoomID, c)
+	c.send <- &OutgoingMessage{Type: "room_left", RoomID: msg.RoomID}
+}
+
+func (c *Client) handleRoomMsg(msg *IncomingMessage) {
+	if msg.RoomID == "" || msg.Payload == "" || msg.Nonce == "" {
+		c.sendError("invalid_room_msg", "room_id, nonce, payload required")
+		return
+	}
+
+	out := &OutgoingMessage{
+		Type:    "room_msg",
+		From:    c.userID,
+		RoomID:  msg.RoomID,
+		Nonce:   msg.Nonce,
+		Payload: msg.Payload,
+		Ts:      msg.Ts,
+	}
+	c.hub.BroadcastRoom(msg.RoomID, c, out)
+}
+
+func (c *Client) handleVoiceJoin(msg *IncomingMessage) {
+	if msg.RoomID == "" {
+		c.sendError("invalid_voice_join", "room_id required")
+		return
+	}
+
+	sendFn := func(msgType, payload, roomID string) {
+		out := &OutgoingMessage{Type: msgType, RoomID: roomID}
+		switch msgType {
+		case "sdp_offer", "sdp_answer":
+			out.SDP = payload
+		case "ice_candidate":
+			out.Candidate = payload
+		}
+		select {
+		case c.send <- out:
+		default:
+		}
+	}
+
+	if err := c.sfu.Join(msg.RoomID, c.userID, sendFn); err != nil {
+		c.sendError("voice_join_failed", err.Error())
+		return
+	}
+
+	// Join the WS room so voice events are broadcast correctly
+	c.hub.JoinRoom(msg.RoomID, c)
+
+	participants := c.sfu.Participants(msg.RoomID)
+	c.send <- &OutgoingMessage{
+		Type:              "voice_joined",
+		RoomID:            msg.RoomID,
+		VoiceParticipants: participants,
+	}
+
+	c.hub.BroadcastRoom(msg.RoomID, c, &OutgoingMessage{
+		Type:   "voice_user_joined",
+		From:   c.userID,
+		RoomID: msg.RoomID,
+	})
+}
+
+func (c *Client) handleVoiceLeave(msg *IncomingMessage) {
+	if msg.RoomID == "" {
+		return
+	}
+	c.sfu.Leave(msg.RoomID, c.userID)
+	c.send <- &OutgoingMessage{Type: "voice_left", RoomID: msg.RoomID}
+}
+
+func (c *Client) handleSdpOffer(msg *IncomingMessage) {
+	if msg.RoomID == "" || msg.SDP == "" {
+		c.sendError("invalid_sdp_offer", "room_id and sdp required")
+		return
+	}
+	answer, err := c.sfu.HandleOffer(msg.RoomID, c.userID, msg.SDP)
+	if err != nil {
+		log.Printf("sdp offer [%s]: %v", c.userID, err)
+		c.sendError("sdp_error", "Could not process offer")
+		return
+	}
+	c.send <- &OutgoingMessage{Type: "sdp_answer", RoomID: msg.RoomID, SDP: answer}
+}
+
+func (c *Client) handleSdpAnswer(msg *IncomingMessage) {
+	if msg.RoomID == "" || msg.SDP == "" {
+		return
+	}
+	if err := c.sfu.HandleAnswer(msg.RoomID, c.userID, msg.SDP); err != nil {
+		log.Printf("sdp answer [%s]: %v", c.userID, err)
+	}
+}
+
+func (c *Client) handleIceCandidate(msg *IncomingMessage) {
+	if msg.RoomID == "" || msg.Candidate == "" {
+		return
+	}
+	if err := c.sfu.HandleICECandidate(msg.RoomID, c.userID, msg.Candidate); err != nil {
+		log.Printf("ice candidate [%s]: %v", c.userID, err)
+	}
+}
+
+func (c *Client) sendError(code, msg string) {
+	c.send <- &OutgoingMessage{Type: "error", Code: code, Msg: msg}
+}

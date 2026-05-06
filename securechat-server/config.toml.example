@@ -1,0 +1,24 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+tls  = false
+# cert = "/etc/securechat/cert.pem"
+# key  = "/etc/securechat/key.pem"
+
+[database]
+path = "./data.db"
+
+[limits]
+max_message_size     = 65536
+max_rooms_per_user   = 50
+offline_ttl_hours    = 72
+max_offline_messages = 500
+
+[jwt]
+secret   = "CHANGE_ME_generate_with_openssl_rand_hex_32"
+ttl_days = 30
+
+[turn]
+enabled = false
+url     = ""
+secret  = ""
