@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
 import 'package:securechat/network/ws_client.dart';
 
 /// Manages the WebRTC peer connection for a single voice room session.
 class VoiceClient {
   final WsClient _ws;
 
-  RTCPeerConnection? _pc;
-  MediaStream? _localStream;
+  webrtc.RTCPeerConnection? _pc;
+  webrtc.MediaStream? _localStream;
   String? _activeRoomId;
 
   bool _muted = false;
@@ -23,7 +23,7 @@ class VoiceClient {
     if (_activeRoomId != null) await leave();
 
     // Request microphone access
-    _localStream = await navigator.mediaDevices.getUserMedia({
+    _localStream = await webrtc.navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': false,
     });
@@ -34,7 +34,7 @@ class VoiceClient {
       ],
     };
 
-    _pc = await createPeerConnection(config);
+    _pc = await webrtc.createPeerConnection(config);
     _activeRoomId = roomId;
 
     // Add local audio tracks to the peer connection
@@ -73,13 +73,13 @@ class VoiceClient {
 
   /// Process the SDP answer from the server (response to our offer).
   Future<void> handleSdpAnswer(String sdp) async {
-    await _pc?.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+    await _pc?.setRemoteDescription(webrtc.RTCSessionDescription(sdp, 'answer'));
   }
 
   /// Process a renegotiation offer from the server (new participant joined).
   Future<void> handleSdpOffer(String roomId, String sdp) async {
     if (_pc == null) return;
-    await _pc!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+    await _pc!.setRemoteDescription(webrtc.RTCSessionDescription(sdp, 'offer'));
     final answer = await _pc!.createAnswer({});
     await _pc!.setLocalDescription(answer);
     _ws.send({
@@ -93,7 +93,7 @@ class VoiceClient {
   Future<void> handleIceCandidate(String candidateJson) async {
     if (_pc == null) return;
     final map = jsonDecode(candidateJson) as Map<String, dynamic>;
-    await _pc!.addCandidate(RTCIceCandidate(
+    await _pc!.addCandidate(webrtc.RTCIceCandidate(
       map['candidate'] as String?,
       map['sdpMid'] as String?,
       map['sdpMLineIndex'] as int?,

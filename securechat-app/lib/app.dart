@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:securechat/network/ws_client.dart';
 import 'package:securechat/screens/home/home_screen.dart';
 import 'package:securechat/screens/setup/server_setup_screen.dart';
 import 'package:securechat/store/app_state.dart';
@@ -16,11 +17,46 @@ final _router = GoRouter(
   ],
 );
 
-class SecureChatApp extends ConsumerWidget {
+// Root widget — lives for the entire app lifetime.
+// Wires the WS message listener here so it survives all navigation.
+class SecureChatApp extends ConsumerStatefulWidget {
   const SecureChatApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SecureChatApp> createState() => _SecureChatAppState();
+}
+
+class _SecureChatAppState extends ConsumerState<SecureChatApp> {
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
+  // Serial queue: each message waits for the previous handler to complete
+  // before starting. Prevents noise_init / dm race on first contact.
+  Future<void> _msgQueue = Future.value();
+
+  @override
+  void initState() {
+    super.initState();
+    // fireImmediately wires the listener right away if a WsClient already exists.
+    ref.listenManual(wsClientProvider, (_, ws) => _rewire(ws),
+        fireImmediately: true);
+  }
+
+  void _rewire(WsClient? ws) {
+    _wsSub?.cancel();
+    _msgQueue = Future.value();
+    if (ws == null) return;
+    _wsSub = ws.messages.listen((msg) {
+      _msgQueue = _msgQueue.then((_) => dispatchIncoming(msg, ref));
+    });
+  }
+
+  @override
+  void dispose() {
+    _wsSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'SecureChat',
       theme: ThemeData(
@@ -40,36 +76,16 @@ class SecureChatApp extends ConsumerWidget {
   }
 }
 
-/// Redirect based on session state + wire WS listener
-class _SplashRedirect extends ConsumerStatefulWidget {
+// Redirect splash — now stateless, no longer owns the WS subscription.
+class _SplashRedirect extends ConsumerWidget {
   const _SplashRedirect();
 
   @override
-  ConsumerState<_SplashRedirect> createState() => _SplashRedirectState();
-}
-
-class _SplashRedirectState extends ConsumerState<_SplashRedirect> {
-  StreamSubscription<Map<String, dynamic>>? _wsSub;
-
-  @override
-  void dispose() {
-    _wsSub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(sessionProvider);
 
     if (session.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    if (session.isAuthenticated) {
-      ref.listen(wsClientProvider, (prev, ws) {
-        _wsSub?.cancel();
-        _wsSub = ws?.messages.listen((msg) => dispatchIncoming(msg, ref));
-      });
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
