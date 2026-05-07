@@ -1,13 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-const _storage = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-);
+import 'secure_kv.dart';
 
 const _keyX25519Private = 'sc_x25519_private';
 const _keyX25519Public  = 'sc_x25519_public';
@@ -37,16 +32,16 @@ class LocalIdentity {
 }
 
 Future<LocalIdentity?> loadIdentity() async {
-  final userId = await _storage.read(key: _keyUserId);
+  final userId = await secureKV.read(key: _keyUserId);
   if (userId == null) return null;
 
   return LocalIdentity(
     userId: userId,
-    displayName: await _storage.read(key: _keyDisplayName) ?? '',
-    serverUrl: await _storage.read(key: _keyServerUrl) ?? '',
-    jwt: await _storage.read(key: _keyJwt) ?? '',
-    x25519Public: hexToBytes(await _storage.read(key: _keyX25519Public) ?? ''),
-    ed25519Public: hexToBytes(await _storage.read(key: _keyEd25519Public) ?? ''),
+    displayName: await secureKV.read(key: _keyDisplayName) ?? '',
+    serverUrl: await secureKV.read(key: _keyServerUrl) ?? '',
+    jwt: await secureKV.read(key: _keyJwt) ?? '',
+    x25519Public: hexToBytes(await secureKV.read(key: _keyX25519Public) ?? ''),
+    ed25519Public: hexToBytes(await secureKV.read(key: _keyEd25519Public) ?? ''),
   );
 }
 
@@ -87,9 +82,9 @@ Future<LocalIdentity> generateAndSaveIdentity({
   );
 }
 
-Future<void> saveJwt(String jwt) => _storage.write(key: _keyJwt, value: jwt);
+Future<void> saveJwt(String jwt) => secureKV.write(key: _keyJwt, value: jwt);
 
-Future<void> clearIdentity() => _storage.deleteAll();
+Future<void> clearIdentity() => secureKV.deleteAll();
 
 /// user_id = BLAKE2s-256(x25519_public_key), hex-encoded
 Future<String> computeUserId(List<int> x25519PublicKey) async {
@@ -126,12 +121,12 @@ Future<void> _writeAll({
 }) async {
   // Sequential writes: Windows Credential Manager does not handle
   // concurrent writes reliably.
-  await _storage.write(key: _keyX25519Private, value: bytesToHex(x25519Priv));
-  await _storage.write(key: _keyX25519Public,  value: bytesToHex(x25519Pub));
-  await _storage.write(key: _keyEd25519Private, value: bytesToHex(ed25519Priv));
-  await _storage.write(key: _keyEd25519Public,  value: bytesToHex(ed25519Pub));
-  await _storage.write(key: _keyUserId,      value: userId);
-  await _storage.write(key: _keyDisplayName, value: displayName);
-  await _storage.write(key: _keyServerUrl,   value: serverUrl);
-  await _storage.write(key: _keyJwt,         value: jwt);
+  await secureKV.write(key: _keyX25519Private, value: bytesToHex(x25519Priv));
+  await secureKV.write(key: _keyX25519Public,  value: bytesToHex(x25519Pub));
+  await secureKV.write(key: _keyEd25519Private, value: bytesToHex(ed25519Priv));
+  await secureKV.write(key: _keyEd25519Public,  value: bytesToHex(ed25519Pub));
+  await secureKV.write(key: _keyUserId,      value: userId);
+  await secureKV.write(key: _keyDisplayName, value: displayName);
+  await secureKV.write(key: _keyServerUrl,   value: serverUrl);
+  await secureKV.write(key: _keyJwt,         value: jwt);
 }

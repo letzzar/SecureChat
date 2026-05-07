@@ -1,20 +1,16 @@
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:securechat/crypto/identity.dart';
-
-const _storage = FlutterSecureStorage(
-  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-);
+import 'package:securechat/crypto/secure_kv.dart';
 const _keyEd25519Private = 'sc_ed25519_private';
 const _keyEd25519Public  = 'sc_ed25519_public';
 
 /// Signs [data] with the local Ed25519 private key.
 /// Returns the 64-byte signature as hex.
 Future<String> signData(List<int> data) async {
-  final privHex = await _storage.read(key: _keyEd25519Private) ?? '';
-  final pubHex  = await _storage.read(key: _keyEd25519Public)  ?? '';
+  final privHex = await secureKV.read(key: _keyEd25519Private) ?? '';
+  final pubHex  = await secureKV.read(key: _keyEd25519Public)  ?? '';
 
   final privBytes = hexToBytes(privHex);
   final kp = await Ed25519().newKeyPairFromSeed(privBytes);

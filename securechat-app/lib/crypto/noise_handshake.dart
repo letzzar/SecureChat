@@ -24,13 +24,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/crypto/message_crypto.dart';
+import 'package:securechat/crypto/secure_kv.dart';
 
-const _storage = FlutterSecureStorage(
-  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-);
 const _keyX25519Private = 'sc_x25519_private';
 
 // In-memory session cache: peer_user_id → session_key bytes
@@ -46,7 +43,7 @@ Future<NoiseInitData> buildNoiseInit({
   required String myUserId,
   required String peerStaticPubHex,
 }) async {
-  final myStaticPriv = hexToBytes(await _storage.read(key: _keyX25519Private) ?? '');
+  final myStaticPriv = hexToBytes(await secureKV.read(key: _keyX25519Private) ?? '');
   final peerStaticPub = hexToBytes(peerStaticPubHex);
 
   // Generate ephemeral keypair
@@ -78,7 +75,7 @@ Future<NoiseRespData> processNoiseInit({
   required String nonce,
   required String payload,
 }) async {
-  final myStaticPriv = hexToBytes(await _storage.read(key: _keyX25519Private) ?? '');
+  final myStaticPriv = hexToBytes(await secureKV.read(key: _keyX25519Private) ?? '');
   final senderStaticPub = hexToBytes(senderStaticPubHex);
   final ePub = hexToBytes(ePubHex);
 
