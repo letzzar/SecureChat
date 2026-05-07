@@ -10,6 +10,7 @@ import 'package:securechat/crypto/signatures.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/network/ws_client.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/store/voice_store.dart';
 
@@ -122,9 +123,121 @@ Future<void> dispatchIncoming(Map<String, dynamic> msg, WidgetRef ref) async {
       }
 
     case 'delivered':
-      // seq → mark delivered in all conversations
-      // simplified: no-op here, handled per-screen if needed
+      // The server acks our send but doesn't tell us the peer. No-op.
+      break;
+
+    case 'file_offer':
+      await _onFileOffer(msg, identity, ref);
+
+    case 'file_accept':
+      final fileId = msg['file_id'] as String? ?? '';
+      final fromId = msg['from'] as String? ?? '';
+      if (fileId.isNotEmpty) {
+        ref.read(fileTransferProvider.notifier).onFileAccepted(fileId, fromId);
+      }
+
+    case 'file_chunk':
+      await _onFileChunk(msg, ref);
+
+    case 'file_reject':
+      final fileId = msg['file_id'] as String? ?? '';
+      if (fileId.isNotEmpty) {
+        ref.read(fileTransferProvider.notifier).updateStatus(fileId, FileTransferStatus.rejected);
+      }
+
+    case 'file_cancel':
+      final fileId = msg['file_id'] as String? ?? '';
+      if (fileId.isNotEmpty) {
+        ref.read(fileTransferProvider.notifier).updateStatus(fileId, FileTransferStatus.cancelled);
+      }
+
+    case 'file_done':
+      final fileId = msg['file_id'] as String? ?? '';
+      if (fileId.isNotEmpty) {
+        ref.read(fileTransferProvider.notifier).onDone(fileId);
+      }
+
+    case 'file_error':
+      final fileId = msg['file_id'] as String? ?? '';
+      if (fileId.isNotEmpty) {
+        ref.read(fileTransferProvider.notifier).updateStatus(fileId, FileTransferStatus.error);
+      }
   }
+}
+
+Future<void> _onFileOffer(
+    Map<String, dynamic> msg, LocalIdentity identity, WidgetRef ref) async {
+  final fromId = msg['from'] as String? ?? '';
+  final fileId = msg['file_id'] as String? ?? '';
+  if (fileId.isEmpty || fromId.isEmpty) return;
+
+  var knownPeers = ref.read(knownPeersProvider);
+  String peerPubHex = knownPeers[fromId]?['public_key'] as String? ?? '';
+  if (peerPubHex.isEmpty) {
+    try {
+      final data = await ref.read(apiClientProvider)?.getUser(fromId);
+      if (data != null) {
+        ref.read(knownPeersProvider.notifier).update((s) => {...s, fromId: data});
+        peerPubHex = data['public_key'] as String? ?? '';
+      }
+    } catch (_) {
+      return;
+    }
+  }
+
+  final sessionKey = getSession(peerPubHex);
+  if (sessionKey == null) return;
+
+  String fileName;
+  int fileSize;
+  try {
+    final decrypted = await decryptMessage(
+      nonceB64: msg['nonce'] as String? ?? '',
+      ciphertextB64: msg['payload'] as String? ?? '',
+      key: sessionKey,
+    );
+    final meta = jsonDecode(utf8.decode(decrypted)) as Map<String, dynamic>;
+    fileName = meta['name'] as String;
+    fileSize = meta['size'] as int;
+  } catch (_) {
+    return;
+  }
+
+  await ref.read(fileTransferProvider.notifier).onIncomingOffer(
+        fileId: fileId,
+        fromId: fromId,
+        peerPubHex: peerPubHex,
+        fileName: fileName,
+        fileSize: fileSize,
+        myUserId: identity.userId,
+      );
+}
+
+Future<void> _onFileChunk(Map<String, dynamic> msg, WidgetRef ref) async {
+  final fileId = msg['file_id'] as String? ?? '';
+  final chunkIndex = msg['chunk_index'] as int? ?? 0;
+  final chunkTotal = msg['chunk_total'] as int? ?? 0;
+  if (fileId.isEmpty) return;
+
+  final ft = ref.read(fileTransferProvider)[fileId];
+  if (ft == null || ft.isOutgoing) return;
+
+  final sessionKey = getSession(ft.peerPubHex);
+  if (sessionKey == null) return;
+
+  try {
+    final decrypted = await decryptMessage(
+      nonceB64: msg['nonce'] as String? ?? '',
+      ciphertextB64: msg['payload'] as String? ?? '',
+      key: sessionKey,
+    );
+    await ref.read(fileTransferProvider.notifier).onChunkReceived(
+          fileId: fileId,
+          chunkIndex: chunkIndex,
+          chunkTotal: chunkTotal,
+          decryptedChunk: decrypted,
+        );
+  } catch (_) {}
 }
 
 Future<void> _onNoiseInit(Map<String, dynamic> msg, WidgetRef ref) async {

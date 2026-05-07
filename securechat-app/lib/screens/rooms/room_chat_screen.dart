@@ -7,6 +7,11 @@ import 'package:securechat/store/messages_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/store/voice_store.dart';
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+String _shortId(String userId) =>
+    userId.length > 12 ? '${userId.substring(0, 12)}…' : userId;
+
 class RoomChatScreen extends ConsumerStatefulWidget {
   final String roomId;
   final String roomName;
@@ -69,6 +74,68 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
     }
   }
 
+  void _showMembers() {
+    final messages = ref.read(
+      roomsProvider.select((s) => s.messages[widget.roomId] ?? []),
+    );
+    final myUserId = ref.read(sessionProvider).identity?.userId ?? '';
+    final knownPeers = ref.read(knownPeersProvider);
+
+    // Collect unique senders including self
+    final members = <String>{myUserId, ...messages.map((m) => m.fromUserId)};
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'Members (${members.length})',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: members.map((uid) {
+                  final displayName =
+                      knownPeers[uid]?['display_name'] as String? ?? '';
+                  final isMe = uid == myUserId;
+                  return ListTile(
+                    leading: CircleAvatar(
+                      child: Text(
+                        displayName.isNotEmpty
+                            ? displayName[0].toUpperCase()
+                            : uid[0].toUpperCase(),
+                      ),
+                    ),
+                    title: Text(
+                      displayName.isNotEmpty
+                          ? displayName
+                          : _shortId(uid),
+                    ),
+                    subtitle: Text(
+                      _shortId(uid),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: isMe
+                        ? const Chip(label: Text('You', style: TextStyle(fontSize: 11)))
+                        : null,
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _confirmLeave() {
     showDialog(
       context: context,
@@ -120,6 +187,11 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.people_outline),
+            tooltip: 'Members',
+            onPressed: _showMembers,
+          ),
+          IconButton(
             icon: const Icon(Icons.exit_to_app),
             tooltip: 'Leave room',
             onPressed: _confirmLeave,
@@ -151,15 +223,18 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
+class _MessageBubble extends ConsumerWidget {
   final RoomMessage msg;
   final bool isMe;
   const _MessageBubble({required this.msg, required this.isMe});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
     final time = DateFormat('HH:mm').format(msg.timestamp);
+    final knownPeers = ref.watch(knownPeersProvider);
+    final senderName = knownPeers[msg.fromUserId]?['display_name'] as String?;
+    final label = senderName ?? _shortId(msg.fromUserId);
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -186,9 +261,7 @@ class _MessageBubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  msg.fromUserId.length > 12
-                      ? '${msg.fromUserId.substring(0, 12)}...'
-                      : msg.fromUserId,
+                  label,
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,

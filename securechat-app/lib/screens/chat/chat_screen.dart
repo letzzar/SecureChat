@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/messages_store.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -62,6 +63,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _sendFile() async {
+    final identity = ref.read(sessionProvider).identity;
+    if (identity == null) return;
+
+    setState(() => _error = null);
+    try {
+      await ref.read(fileTransferProvider.notifier).sendFile(
+            myUserId: identity.userId,
+            peerId: widget.peerUserId,
+            peerPubHex: widget.peerStaticPubHex,
+          );
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -80,7 +98,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final identity = ref.watch(sessionProvider).identity;
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Auto-scroll on new messages
     ref.listen(conversationProvider, (_, __) => _scrollToBottom());
 
     return Scaffold(
@@ -121,18 +138,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               color: colorScheme.errorContainer,
-              child: Text(_error!, style: TextStyle(color: colorScheme.onErrorContainer, fontSize: 12)),
+              child: Text(_error!,
+                  style: TextStyle(color: colorScheme.onErrorContainer, fontSize: 12)),
             ),
           _InputBar(
             controller: _inputController,
             sending: _sending,
             onSend: _send,
+            onAttach: _sendFile,
           ),
         ],
       ),
     );
   }
 }
+
+// ── Message bubble (text or file) ─────────────────────────────────────────────
 
 class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
@@ -142,6 +163,10 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (message.kind == MessageKind.file) {
+      return _FileBubble(message: message);
+    }
+
     final isMe = message.isOutgoing;
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -149,9 +174,7 @@ class _MessageBubble extends StatelessWidget {
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.72,
-        ),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         decoration: BoxDecoration(
           color: isMe ? colorScheme.primary : colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.only(
@@ -214,15 +237,171 @@ class _MessageBubble extends StatelessWidget {
       };
 }
 
+// ── File bubble ───────────────────────────────────────────────────────────────
+
+class _FileBubble extends ConsumerWidget {
+  final ChatMessage message;
+  const _FileBubble({required this.message});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fileId = message.fileId ?? '';
+    final ft = ref.watch(fileTransferProvider.select((s) => s[fileId]));
+    final isMe = message.isOutgoing;
+    final cs = Theme.of(context).colorScheme;
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+        decoration: BoxDecoration(
+          color: isMe ? cs.primaryContainer : cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.insert_drive_file, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    message.fileName ?? 'File',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSurface,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (message.fileSize != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  _formatSize(message.fileSize!),
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                ),
+              ),
+            if (ft != null) ...[
+              const SizedBox(height: 8),
+              _FileStatus(ft: ft, ref: ref),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+class _FileStatus extends StatelessWidget {
+  final FileTransfer ft;
+  final WidgetRef ref;
+  const _FileStatus({required this.ft, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (ft.status) {
+      FileTransferStatus.offering when !ft.isOutgoing => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton.tonal(
+              onPressed: () =>
+                  ref.read(fileTransferProvider.notifier).acceptOffer(ft.fileId),
+              style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
+              child: const Text('Accept', style: TextStyle(fontSize: 13)),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: () =>
+                  ref.read(fileTransferProvider.notifier).rejectOffer(ft.fileId),
+              style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+              child:
+                  const Text('Reject', style: TextStyle(fontSize: 13, color: Colors.red)),
+            ),
+          ],
+        ),
+      FileTransferStatus.offering => const Text(
+          'Waiting for acceptance…',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      FileTransferStatus.transferring => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: ft.progress,
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${(ft.progress * 100).toStringAsFixed(0)}%  '
+              '(${ft.chunksReceived}/${ft.chunksTotal} parts)',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ),
+      FileTransferStatus.done => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, size: 16, color: Colors.green),
+            const SizedBox(width: 4),
+            Text(
+              ft.isOutgoing ? 'Sent' : 'Saved to ${ft.savedPath ?? "downloads"}',
+              style: const TextStyle(fontSize: 12, color: Colors.green),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      FileTransferStatus.rejected => const Text(
+          'Rejected',
+          style: TextStyle(fontSize: 12, color: Colors.red),
+        ),
+      FileTransferStatus.cancelled => const Text(
+          'Cancelled',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      FileTransferStatus.error => const Text(
+          'Error during transfer',
+          style: TextStyle(fontSize: 12, color: Colors.red),
+        ),
+    };
+  }
+}
+
+// ── Input bar ─────────────────────────────────────────────────────────────────
+
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
+  final VoidCallback onAttach;
 
   const _InputBar({
     required this.controller,
     required this.sending,
     required this.onSend,
+    required this.onAttach,
   });
 
   @override
@@ -232,6 +411,11 @@ class _InputBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Row(
           children: [
+            IconButton(
+              icon: const Icon(Icons.attach_file),
+              tooltip: 'Send file',
+              onPressed: onAttach,
+            ),
             Expanded(
               child: TextField(
                 controller: controller,
@@ -246,7 +430,8 @@ class _InputBar extends StatelessWidget {
                     borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide.none,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -257,7 +442,8 @@ class _InputBar extends StatelessWidget {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
                     )
                   : const Icon(Icons.send),
             ),
