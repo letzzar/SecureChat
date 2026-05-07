@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/dm_voice_store.dart';
 import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/messages_store.dart';
 
@@ -100,6 +101,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     ref.listen(conversationProvider, (_, __) => _scrollToBottom());
 
+    final callState = ref.watch(dmCallProvider);
+    final callIsIdle = callState.status == DmCallStatus.idle;
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -112,9 +116,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ],
         ),
+        actions: [
+          if (callIsIdle)
+            IconButton(
+              icon: const Icon(Icons.call),
+              tooltip: 'Voice call',
+              onPressed: () => ref.read(dmCallProvider.notifier).startCall(
+                    widget.peerUserId,
+                    widget.peerDisplayName,
+                  ),
+            ),
+        ],
       ),
       body: Column(
         children: [
+          _DmCallBar(peerUserId: widget.peerUserId),
           Expanded(
             child: messages.isEmpty
                 ? Center(
@@ -232,7 +248,7 @@ class _MessageBubble extends StatelessWidget {
 
   IconData _statusIcon(MessageStatus status) => switch (status) {
         MessageStatus.sending => Icons.access_time,
-        MessageStatus.delivered => Icons.done_all,
+        MessageStatus.delivered => Icons.done,
         MessageStatus.failed => Icons.error_outline,
       };
 }
@@ -386,6 +402,91 @@ class _FileStatus extends StatelessWidget {
           style: TextStyle(fontSize: 12, color: Colors.red),
         ),
     };
+  }
+}
+
+// ── DM Call Bar ───────────────────────────────────────────────────────────────
+
+class _DmCallBar extends ConsumerWidget {
+  final String peerUserId;
+  const _DmCallBar({required this.peerUserId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final call = ref.watch(dmCallProvider);
+    if (call.status == DmCallStatus.idle) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      color: cs.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Icon(Icons.call,
+              size: 18,
+              color: call.status == DmCallStatus.inCall
+                  ? Colors.green
+                  : cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              switch (call.status) {
+                DmCallStatus.calling => 'Calling…',
+                DmCallStatus.ringing =>
+                  'Incoming call from ${call.peerDisplayName ?? call.peerId ?? ""}',
+                DmCallStatus.inCall =>
+                  call.muted ? 'In call · Muted' : 'In call',
+                DmCallStatus.idle => '',
+              },
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+          if (call.status == DmCallStatus.ringing) ...[
+            FilledButton(
+              onPressed: () => ref.read(dmCallProvider.notifier).acceptCall(),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.green,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              ),
+              child: const Text('Accept', style: TextStyle(fontSize: 12)),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: () => ref.read(dmCallProvider.notifier).rejectCall(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              ),
+              child: const Text('Reject', style: TextStyle(fontSize: 12)),
+            ),
+          ] else if (call.status == DmCallStatus.inCall) ...[
+            IconButton(
+              icon: Icon(call.muted ? Icons.mic_off : Icons.mic,
+                  size: 20,
+                  color: call.muted ? Colors.red : cs.onSurfaceVariant),
+              tooltip: call.muted ? 'Unmute' : 'Mute',
+              onPressed: () =>
+                  ref.read(dmCallProvider.notifier).toggleMute(),
+            ),
+            IconButton(
+              icon: const Icon(Icons.call_end, size: 20, color: Colors.red),
+              tooltip: 'End call',
+              onPressed: () => ref.read(dmCallProvider.notifier).endCall(),
+            ),
+          ] else ...[
+            IconButton(
+              icon: const Icon(Icons.call_end, size: 20, color: Colors.red),
+              tooltip: 'Cancel call',
+              onPressed: () => ref.read(dmCallProvider.notifier).endCall(),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

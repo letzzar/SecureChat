@@ -103,10 +103,13 @@ class _DirectMessagesTabState extends ConsumerState<_DirectMessagesTab> {
   void _openChat(Map<String, dynamic> user) {
     _searchController.clear();
     setState(() => _searchResults = []);
+    final userId = user['user_id'] as String;
+    // Store full peer data so conversation list shows display name
+    ref.read(knownPeersProvider.notifier).update((s) => {...s, userId: user});
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ChatScreen(
-          peerUserId: user['user_id'] as String,
+          peerUserId: userId,
           peerDisplayName: user['display_name'] as String,
           peerStaticPubHex: user['public_key'] as String,
         ),

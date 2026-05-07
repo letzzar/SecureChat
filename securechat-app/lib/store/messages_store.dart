@@ -10,6 +10,7 @@ import 'package:securechat/crypto/signatures.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/network/ws_client.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/dm_voice_store.dart';
 import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/store/voice_store.dart';
@@ -125,8 +126,39 @@ Future<void> dispatchIncoming(Map<String, dynamic> msg, WidgetRef ref) async {
       }
 
     case 'delivered':
-      // The server acks our send but doesn't tell us the peer. No-op.
-      break;
+      final deliveredSeq = (msg['delivered_seq'] as int?) ?? 0;
+      if (deliveredSeq > 0) {
+        final entry = _pendingSeqs.remove(deliveredSeq);
+        if (entry != null) {
+          ref.read(conversationProvider.notifier)
+              .markDelivered(entry.peerId, entry.msgId);
+        }
+      }
+
+    case 'dm_call_offer':
+      final fromId = msg['from'] as String? ?? '';
+      final sdp = msg['sdp'] as String? ?? '';
+      if (fromId.isNotEmpty && sdp.isNotEmpty) {
+        final knownPeers = ref.read(knownPeersProvider);
+        final displayName =
+            knownPeers[fromId]?['display_name'] as String? ??
+                fromId.substring(0, 12);
+        ref.read(dmCallProvider.notifier).onIncomingOffer(fromId, displayName, sdp);
+      }
+
+    case 'dm_call_answer':
+      final sdp = msg['sdp'] as String? ?? '';
+      if (sdp.isNotEmpty) await ref.read(dmCallProvider.notifier).onAnswer(sdp);
+
+    case 'dm_call_reject':
+    case 'dm_call_end':
+      ref.read(dmCallProvider.notifier).onRemoteEnd();
+
+    case 'dm_ice_candidate':
+      final candidate = msg['candidate'] as String? ?? '';
+      if (candidate.isNotEmpty) {
+        await ref.read(dmCallProvider.notifier).onIceCandidate(candidate);
+      }
 
     case 'file_offer':
       await _onFileOffer(msg, identity, ref);
@@ -361,6 +393,10 @@ Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef r
   ref.read(conversationProvider.notifier).addMessage(fromId, incoming);
 }
 
+// ── Pending delivery acks (seq → {peerId, msgId}) ────────────────────────────
+
+final _pendingSeqs = <int, ({String peerId, String msgId})>{};
+
 // ── Send DM ───────────────────────────────────────────────────────────────────
 
 final _rng = Random.secure();
@@ -391,10 +427,10 @@ Future<String?> sendDM({
 
   // If no session yet, start handshake first (message will be sent after noise_resp)
   if (!hasSession(peerStaticPubHex)) {
-    // Cache peer pub so we can look it up in _onNoiseResp
-    ref.read(knownPeersProvider.notifier).update((s) => {
-      ...s,
-      peerUserId: {'user_id': peerUserId, 'public_key': peerStaticPubHex},
+    // Cache peer pub only if not already known (avoid overwriting display_name)
+    ref.read(knownPeersProvider.notifier).update((s) {
+      if (s.containsKey(peerUserId)) return s;
+      return {...s, peerUserId: {'user_id': peerUserId, 'public_key': peerStaticPubHex}};
     });
 
     final initData = await buildNoiseInit(
@@ -442,6 +478,8 @@ Future<String?> sendDM({
     status: MessageStatus.sending,
   );
   ref.read(conversationProvider.notifier).addMessage(peerUserId, outgoing);
+
+  _pendingSeqs[seq] = (peerId: peerUserId, msgId: msgId);
 
   ws.send({
     'type': 'dm',
