@@ -113,6 +113,10 @@ SecureChat/
 | Go server | Go 1.21+ |
 | Server OS | Linux, Windows, or macOS (x64) |
 
+## License
+
+GNU General Public License v3.0 — see [LICENSE](LICENSE)
+
 ---
 
 # Español
@@ -211,6 +215,10 @@ SecureChat/
 - **Sin metadatos innecesarios**: el servidor no sabe quién habla con quién dentro de una sala
 - **Pila mínima y auditable**: menos de 500 líneas de código criptográfico total
 - **Autocontenido**: cualquier persona puede levantar su propio servidor en minutos
+
+## Licencia
+
+GNU General Public License v3.0 — ver [LICENSE](LICENSE)
 
 ---
 
