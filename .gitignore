@@ -26,6 +26,9 @@ securechat-app/windows/flutter/generated_plugin_registrant.h
 securechat-app/windows/flutter/generated_plugins.cmake
 
 # ─── Go / Server ──────────────────────────────────────────────────────────────
+data.db
+data.db-shm
+data.db-wal
 securechat-server/data.db
 securechat-server/data.db-shm
 securechat-server/data.db-wal
