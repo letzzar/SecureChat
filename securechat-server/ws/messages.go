@@ -19,6 +19,11 @@ type IncomingMessage struct {
 	// voice signaling
 	SDP       string `json:"sdp,omitempty"`
 	Candidate string `json:"candidate,omitempty"`
+
+	// file transfer (relay-only, payload is E2E encrypted by client)
+	FileID     string `json:"file_id,omitempty"`
+	ChunkIndex int    `json:"chunk_index,omitempty"`
+	ChunkTotal int    `json:"chunk_total,omitempty"`
 }
 
 // OutgoingMessage is the top-level envelope for all server→client WebSocket messages.
@@ -45,6 +50,11 @@ type OutgoingMessage struct {
 	SDP               string   `json:"sdp,omitempty"`
 	Candidate         string   `json:"candidate,omitempty"`
 	VoiceParticipants []string `json:"voice_participants,omitempty"`
+
+	// file transfer
+	FileID     string `json:"file_id,omitempty"`
+	ChunkIndex int    `json:"chunk_index,omitempty"`
+	ChunkTotal int    `json:"chunk_total,omitempty"`
 
 	// error
 	Code string `json:"code,omitempty"`

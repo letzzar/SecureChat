@@ -20,6 +20,8 @@ type ServerConfig struct {
 	TLS  bool   `toml:"tls"`
 	Cert string `toml:"cert"`
 	Key  string `toml:"key"`
+	// Mode controls registration: "private" requires an invite code, "public" allows open registration.
+	Mode string `toml:"mode"`
 }
 
 type DatabaseConfig struct {
@@ -48,6 +50,7 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	cfg.Server.Host = "0.0.0.0"
 	cfg.Server.Port = 8443
+	cfg.Server.Mode = "private"
 	cfg.Database.Path = "data.db"
 	cfg.Limits.MaxMessageSize = 65536
 	cfg.Limits.MaxRoomsPerUser = 50

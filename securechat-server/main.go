@@ -75,7 +75,7 @@ func main() {
 	router := api.NewRouter(cfg, database, hub, sfuInst)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("SecureChat server starting on %s (TLS=%v)", addr, cfg.Server.TLS)
+	log.Printf("SecureChat server starting on %s (TLS=%v, mode=%s)", addr, cfg.Server.TLS, cfg.Server.Mode)
 
 	if cfg.Server.TLS {
 		if cfg.Server.Cert == "" || cfg.Server.Key == "" {

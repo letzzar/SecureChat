@@ -4,6 +4,7 @@ port = 8080
 tls  = false
 # cert = "/etc/securechat/cert.pem"
 # key  = "/etc/securechat/key.pem"
+mode = "private"   # "private" = invite-only registration | "public" = open registration
 
 [database]
 path = "./data.db"

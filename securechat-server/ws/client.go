@@ -168,6 +168,13 @@ func (c *Client) handleMessage(raw []byte) {
 	case "ice_candidate":
 		c.handleIceCandidate(&msg)
 
+	case "file_offer":
+		c.handleFileOffer(&msg)
+	case "file_chunk":
+		c.handleFileChunk(&msg)
+	case "file_accept", "file_reject", "file_cancel", "file_done":
+		c.handleFileRelay(&msg)
+
 	default:
 		c.sendError("unknown_type", "Unknown message type: "+msg.Type)
 	}
@@ -362,6 +369,71 @@ func (c *Client) handleIceCandidate(msg *IncomingMessage) {
 	if err := c.sfu.HandleICECandidate(msg.RoomID, c.userID, msg.Candidate); err != nil {
 		log.Printf("ice candidate [%s]: %v", c.userID, err)
 	}
+}
+
+// handleFileOffer relays a file transfer offer only if the recipient is currently online.
+// Metadata (file name, size, mime) is E2E-encrypted by the client inside payload.
+func (c *Client) handleFileOffer(msg *IncomingMessage) {
+	if msg.To == "" || msg.FileID == "" || msg.Payload == "" {
+		c.sendError("invalid_file_offer", "file_offer requires to, file_id, payload")
+		return
+	}
+	if !c.hub.IsOnline(msg.To) {
+		c.send <- &OutgoingMessage{
+			Type:   "file_error",
+			FileID: msg.FileID,
+			Code:   "user_offline",
+			Msg:    "Recipient is not online",
+		}
+		return
+	}
+	c.hub.Send(msg.To, &OutgoingMessage{
+		Type:    "file_offer",
+		From:    c.userID,
+		FileID:  msg.FileID,
+		Payload: msg.Payload,
+		Nonce:   msg.Nonce,
+		Sig:     msg.Sig,
+		EPub:    msg.EPub,
+	})
+}
+
+// handleFileChunk relays an encrypted file chunk. If the recipient has gone offline
+// mid-transfer, sends file_cancel back to the sender so it can abort.
+func (c *Client) handleFileChunk(msg *IncomingMessage) {
+	if msg.To == "" || msg.FileID == "" || msg.Payload == "" {
+		c.sendError("invalid_file_chunk", "file_chunk requires to, file_id, payload")
+		return
+	}
+	delivered := c.hub.Send(msg.To, &OutgoingMessage{
+		Type:       "file_chunk",
+		From:       c.userID,
+		FileID:     msg.FileID,
+		ChunkIndex: msg.ChunkIndex,
+		ChunkTotal: msg.ChunkTotal,
+		Payload:    msg.Payload,
+		Nonce:      msg.Nonce,
+	})
+	if !delivered {
+		c.send <- &OutgoingMessage{
+			Type:   "file_cancel",
+			FileID: msg.FileID,
+			Code:   "user_offline",
+			Msg:    "Recipient disconnected during transfer",
+		}
+	}
+}
+
+// handleFileRelay is a pure relay for accept / reject / cancel / done signals.
+func (c *Client) handleFileRelay(msg *IncomingMessage) {
+	if msg.To == "" || msg.FileID == "" {
+		return
+	}
+	c.hub.Send(msg.To, &OutgoingMessage{
+		Type:   msg.Type,
+		From:   c.userID,
+		FileID: msg.FileID,
+	})
 }
 
 func (c *Client) sendError(code, msg string) {

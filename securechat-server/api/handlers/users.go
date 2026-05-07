@@ -72,19 +72,21 @@ func Register(cfg *config.Config, database *sql.DB) http.HandlerFunc {
 				return
 			}
 		} else {
-			// New user: require and consume a valid invite token
-			if req.InviteCode == "" {
-				writeError(w, http.StatusForbidden, "invite_required", "An invite code is required to register")
-				return
-			}
-			ok, err := db.UseInvite(database, req.InviteCode)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "db_error", "Database error")
-				return
-			}
-			if !ok {
-				writeError(w, http.StatusForbidden, "invalid_invite", "Invalid or expired invite code")
-				return
+			// New user: in private mode require and consume a valid invite token.
+			if cfg.Server.Mode != "public" {
+				if req.InviteCode == "" {
+					writeError(w, http.StatusForbidden, "invite_required", "An invite code is required to register")
+					return
+				}
+				ok, err := db.UseInvite(database, req.InviteCode)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "db_error", "Database error")
+					return
+				}
+				if !ok {
+					writeError(w, http.StatusForbidden, "invalid_invite", "Invalid or expired invite code")
+					return
+				}
 			}
 
 			u := &db.User{
