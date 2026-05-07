@@ -47,6 +47,10 @@ class SessionNotifier extends Notifier<SessionState> {
 
 final sessionProvider = NotifierProvider<SessionNotifier, SessionState>(SessionNotifier.new);
 
+// ── Known peers (userId → server user JSON) ───────────────────────────────────
+
+final knownPeersProvider = StateProvider<Map<String, Map<String, dynamic>>>((ref) => {});
+
 // ── ApiClient provider ────────────────────────────────────────────────────────
 
 final apiClientProvider = Provider<ApiClient?>((ref) {

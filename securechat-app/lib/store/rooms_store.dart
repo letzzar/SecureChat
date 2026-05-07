@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:securechat/crypto/room_crypto.dart';
 import 'package:securechat/models/room.dart';
 import 'package:securechat/network/ws_client.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/file_transfer_store.dart';
 
 // ── Room keys (in-memory, never persisted) ────────────────────────────────────
 
@@ -129,19 +131,81 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
   final roomId = msg['room_id'] as String? ?? '';
   final fromId = msg['from'] as String? ?? '';
   final payload = msg['payload'] as String? ?? '';
+  final nonce = msg['nonce'] as String? ?? '';
   final ts = (msg['ts'] as int?) ?? 0;
 
   final key = getRoomKey(roomId);
-  if (key == null) return; // not in this room
+  if (key == null) return;
 
+  final myUserId = ref.read(sessionProvider).identity?.userId ?? '';
+
+  // Fetch display name if unknown
+  if (fromId.isNotEmpty && fromId != myUserId) {
+    final knownPeers = ref.read(knownPeersProvider);
+    if (!knownPeers.containsKey(fromId)) {
+      try {
+        final data = await ref.read(apiClientProvider)?.getUser(fromId);
+        if (data != null) {
+          ref.read(knownPeersProvider.notifier).update((s) => {...s, fromId: data});
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (nonce == 'file_offer') {
+    String decrypted;
+    try {
+      decrypted = await decryptRoomMessage(payload, key);
+    } catch (_) {
+      return;
+    }
+    try {
+      final meta = jsonDecode(decrypted) as Map<String, dynamic>;
+      final fileId = meta['file_id'] as String;
+      final fileName = meta['name'] as String;
+      final fileSize = meta['size'] as int;
+      await ref.read(fileTransferProvider.notifier).onRoomFileOffer(
+            roomId: roomId,
+            fromId: fromId,
+            fileId: fileId,
+            fileName: fileName,
+            fileSize: fileSize,
+            myUserId: myUserId,
+          );
+    } catch (_) {}
+    return;
+  }
+
+  if (nonce == 'file_chunk') {
+    String decrypted;
+    try {
+      decrypted = await decryptRoomMessage(payload, key);
+    } catch (_) {
+      return;
+    }
+    try {
+      final meta = jsonDecode(decrypted) as Map<String, dynamic>;
+      final fileId = meta['file_id'] as String;
+      final index = meta['index'] as int;
+      final total = meta['total'] as int;
+      final data = base64Decode(meta['data'] as String);
+      await ref.read(fileTransferProvider.notifier).onRoomChunkReceived(
+            fileId: fileId,
+            chunkIndex: index,
+            chunkTotal: total,
+            chunkData: data,
+          );
+    } catch (_) {}
+    return;
+  }
+
+  // Regular text message
   String text;
   try {
     text = await decryptRoomMessage(payload, key);
   } catch (_) {
     text = '[decryption failed]';
   }
-
-  final myUserId = ref.read(sessionProvider).identity?.userId ?? '';
 
   ref.read(roomsProvider.notifier).addIncomingMessage(
     roomId,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:securechat/models/room.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/messages_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/store/voice_store.dart';
@@ -70,6 +71,31 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Send failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _sendFile() async {
+    final myUserId = ref.read(sessionProvider).identity?.userId ?? '';
+    final key = getRoomKey(widget.roomId);
+    if (key == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Room key not available')));
+      }
+      return;
+    }
+    try {
+      await ref.read(fileTransferProvider.notifier).sendRoomFile(
+            roomId: widget.roomId,
+            myUserId: myUserId,
+            roomKey: key,
+          );
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('File send failed: $e')));
       }
     }
   }
@@ -216,7 +242,7 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
                     ),
                   ),
           ),
-          _InputBar(controller: _textCtrl, onSend: _send),
+          _InputBar(controller: _textCtrl, onSend: _send, onAttach: _sendFile),
         ],
       ),
     );
@@ -230,6 +256,10 @@ class _MessageBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (msg.kind == RoomMessageKind.file) {
+      return _RoomFileBubble(msg: msg, isMe: isMe);
+    }
+
     final cs = Theme.of(context).colorScheme;
     final time = DateFormat('HH:mm').format(msg.timestamp);
     final knownPeers = ref.watch(knownPeersProvider);
@@ -279,6 +309,103 @@ class _MessageBubble extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+class _RoomFileBubble extends ConsumerWidget {
+  final RoomMessage msg;
+  final bool isMe;
+  const _RoomFileBubble({required this.msg, required this.isMe});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    final ft = ref.watch(fileTransferProvider.select((s) => s[msg.fileId ?? '']));
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        decoration: BoxDecoration(
+          color: isMe ? cs.primaryContainer : cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.insert_drive_file, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    msg.fileName ?? 'File',
+                    style: TextStyle(fontWeight: FontWeight.w600, color: cs.onSurface),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (msg.fileSize != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(_formatSize(msg.fileSize!),
+                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+              ),
+            if (ft != null) ...[
+              const SizedBox(height: 8),
+              _buildStatus(ft, cs),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatus(FileTransfer ft, ColorScheme cs) {
+    return switch (ft.status) {
+      FileTransferStatus.transferring => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(value: ft.progress, minHeight: 6),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${(ft.progress * 100).toStringAsFixed(0)}%  (${ft.chunksReceived}/${ft.chunksTotal})',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ),
+      FileTransferStatus.done => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, size: 16, color: Colors.green),
+            const SizedBox(width: 4),
+            Text(
+              ft.isOutgoing ? 'Sent' : 'Saved to ${ft.savedPath ?? "downloads"}',
+              style: const TextStyle(fontSize: 12, color: Colors.green),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      FileTransferStatus.error => const Text('Error during transfer',
+          style: TextStyle(fontSize: 12, color: Colors.red)),
+      _ => const SizedBox.shrink(),
+    };
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }
 
@@ -351,7 +478,8 @@ class _VoiceBar extends ConsumerWidget {
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
-  const _InputBar({required this.controller, required this.onSend});
+  final VoidCallback onAttach;
+  const _InputBar({required this.controller, required this.onSend, required this.onAttach});
 
   @override
   Widget build(BuildContext context) {
@@ -360,6 +488,11 @@ class _InputBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(
           children: [
+            IconButton(
+              icon: const Icon(Icons.attach_file),
+              tooltip: 'Send file',
+              onPressed: onAttach,
+            ),
             Expanded(
               child: TextField(
                 controller: controller,

@@ -185,15 +185,23 @@ class _DirectMessagesTabState extends ConsumerState<_DirectMessagesTab> {
     );
   }
 
-  void _openConversation(String peerId) {
-    final knownPeers = ref.read(knownPeersProvider);
-    final peer = knownPeers[peerId];
-    if (peer == null) return;
+  Future<void> _openConversation(String peerId) async {
+    var peer = ref.read(knownPeersProvider)[peerId];
+    if (peer == null) {
+      try {
+        final data = await ref.read(apiClientProvider)?.getUser(peerId);
+        if (data != null) {
+          ref.read(knownPeersProvider.notifier).update((s) => {...s, peerId: data});
+          peer = data;
+        }
+      } catch (_) {}
+    }
+    if (peer == null || !mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ChatScreen(
           peerUserId: peerId,
-          peerDisplayName: peer['display_name'] as String? ?? peerId,
+          peerDisplayName: peer!['display_name'] as String? ?? peerId,
           peerStaticPubHex: peer['public_key'] as String? ?? '',
         ),
       ),

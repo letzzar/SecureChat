@@ -14,10 +14,6 @@ import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/store/voice_store.dart';
 
-// ── Known peers (peer_user_id → server user JSON) ────────────────────────────
-
-final knownPeersProvider = StateProvider<Map<String, Map<String, dynamic>>>((ref) => {});
-
 // ── Conversation messages ─────────────────────────────────────────────────────
 
 class ConversationState {
