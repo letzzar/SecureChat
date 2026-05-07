@@ -28,7 +28,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/crypto/message_crypto.dart';
 
-const _storage = FlutterSecureStorage();
+const _storage = FlutterSecureStorage(
+  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+);
 const _keyX25519Private = 'sc_x25519_private';
 
 // In-memory session cache: peer_user_id → session_key bytes

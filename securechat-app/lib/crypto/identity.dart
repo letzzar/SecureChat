@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 const _storage = FlutterSecureStorage(
   aOptions: AndroidOptions(encryptedSharedPreferences: true),
   iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
 );
 
 const _keyX25519Private = 'sc_x25519_private';

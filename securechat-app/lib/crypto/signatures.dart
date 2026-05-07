@@ -4,7 +4,9 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:securechat/crypto/identity.dart';
 
-const _storage = FlutterSecureStorage();
+const _storage = FlutterSecureStorage(
+  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+);
 const _keyEd25519Private = 'sc_ed25519_private';
 const _keyEd25519Public  = 'sc_ed25519_public';
 
