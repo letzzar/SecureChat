@@ -10,6 +10,8 @@ import 'package:securechat/store/app_state.dart';
 import 'package:securechat/store/messages_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 
+String _shortUserId(String id) => id.length > 16 ? '${id.substring(0, 16)}…' : id;
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -115,6 +117,7 @@ class _DirectMessagesTabState extends ConsumerState<_DirectMessagesTab> {
   @override
   Widget build(BuildContext context) {
     final conversations = ref.watch(conversationProvider).byPeer;
+    final requests = ref.watch(contactRequestsProvider);
 
     return Column(
       children: [
@@ -162,24 +165,31 @@ class _DirectMessagesTabState extends ConsumerState<_DirectMessagesTab> {
               },
             ),
           )
-        else if (conversations.isEmpty)
-          const Expanded(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text('No conversations yet', style: TextStyle(color: Colors.grey)),
-                  SizedBox(height: 8),
-                  Text('Search a user above to start chatting', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                ],
-              ),
-            ),
-          )
         else
           Expanded(
-            child: _ConversationList(onTap: _openConversation),
+            child: Column(
+              children: [
+                if (requests.isNotEmpty) _ContactRequestsSection(requests: requests),
+                if (conversations.isEmpty && requests.isEmpty)
+                  const Expanded(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
+                          SizedBox(height: 16),
+                          Text('No conversations yet', style: TextStyle(color: Colors.grey)),
+                          SizedBox(height: 8),
+                          Text('Search a user above to start chatting',
+                              style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (conversations.isNotEmpty)
+                  Expanded(child: _ConversationList(onTap: _openConversation)),
+              ],
+            ),
           ),
       ],
     );
@@ -209,9 +219,141 @@ class _DirectMessagesTabState extends ConsumerState<_DirectMessagesTab> {
   }
 }
 
+// ── Contact Requests Section ──────────────────────────────────────────────────
+
+class _ContactRequestsSection extends ConsumerWidget {
+  final List<ContactRequest> requests;
+  const _ContactRequestsSection({required this.requests});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            'Contact Requests (${requests.length})',
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: cs.primary),
+          ),
+        ),
+        ...requests.map((r) => _ContactRequestTile(request: r)),
+        const Divider(height: 1),
+      ],
+    );
+  }
+}
+
+class _ContactRequestTile extends ConsumerWidget {
+  final ContactRequest request;
+  const _ContactRequestTile({required this.request});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preview = request.messages.isNotEmpty ? request.messages.last.text : '';
+    return ListTile(
+      leading: CircleAvatar(
+        child: Text(request.displayName.isNotEmpty
+            ? request.displayName[0].toUpperCase()
+            : '?'),
+      ),
+      title: Text(request.displayName),
+      subtitle: Text(
+        request.messages.length > 1
+            ? '${request.messages.length} messages — $preview'
+            : preview,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 12),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton.tonal(
+            onPressed: () => _accept(context, ref),
+            style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
+            child: const Text('Accept', style: TextStyle(fontSize: 12)),
+          ),
+          const SizedBox(width: 4),
+          TextButton(
+            onPressed: () => _block(ref),
+            style: TextButton.styleFrom(
+                foregroundColor: Colors.red,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+            child: const Text('Block', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _accept(BuildContext context, WidgetRef ref) {
+    ref.read(acceptedContactsProvider.notifier).update((s) => {...s, request.fromId});
+    for (final msg in request.messages) {
+      ref.read(conversationProvider.notifier).addMessage(request.fromId, msg);
+    }
+    ref.read(contactRequestsProvider.notifier).remove(request.fromId);
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ChatScreen(
+        peerUserId: request.fromId,
+        peerDisplayName: request.displayName,
+        peerStaticPubHex: request.pubHex,
+      ),
+    ));
+  }
+
+  void _block(WidgetRef ref) {
+    ref.read(blockedUsersProvider.notifier).update((s) => {...s, request.fromId});
+    ref.read(contactRequestsProvider.notifier).remove(request.fromId);
+  }
+}
+
+// ── Conversation List ─────────────────────────────────────────────────────────
+
 class _ConversationList extends ConsumerWidget {
   final void Function(String peerId) onTap;
   const _ConversationList({required this.onTap});
+
+  void _showOptions(BuildContext context, WidgetRef ref, String peerId, String displayName) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(displayName,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete conversation'),
+              onTap: () {
+                Navigator.pop(ctx);
+                ref.read(conversationProvider.notifier).removeConversation(peerId);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.block, color: Colors.red),
+              title: const Text('Block user', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(ctx);
+                ref.read(blockedUsersProvider.notifier).update((s) => {...s, peerId});
+                ref.read(acceptedContactsProvider.notifier).update((s) => {...s}..remove(peerId));
+                ref.read(conversationProvider.notifier).removeConversation(peerId);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -226,27 +368,41 @@ class _ConversationList extends ConsumerWidget {
         final peerId = peers[i];
         final msgs = conversations[peerId] ?? [];
         final lastMsg = msgs.isNotEmpty ? msgs.last : null;
-        final displayName = knownPeers[peerId]?['display_name'] as String? ?? peerId;
-        final unread = msgs.where((m) => !m.isOutgoing && m.status != MessageStatus.delivered).length;
+        final displayName = knownPeers[peerId]?['display_name'] as String? ??
+            _shortUserId(peerId);
+        final unread = msgs
+            .where((m) => !m.isOutgoing && m.status != MessageStatus.delivered)
+            .length;
 
-        return ListTile(
-          leading: CircleAvatar(child: Text(displayName[0].toUpperCase())),
-          title: Text(displayName),
-          subtitle: lastMsg != null
-              ? Text(
-                  lastMsg.isOutgoing ? 'You: ${lastMsg.text}' : lastMsg.text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                )
-              : null,
-          trailing: unread > 0
-              ? CircleAvatar(
-                  radius: 10,
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 10)),
-                )
-              : null,
-          onTap: () => onTap(peerId),
+        return GestureDetector(
+          onSecondaryTapDown: (_) =>
+              _showOptions(context, ref, peerId, displayName),
+          child: ListTile(
+            leading: CircleAvatar(
+                child: Text(displayName[0].toUpperCase())),
+            title: Text(displayName),
+            subtitle: lastMsg != null
+                ? Text(
+                    lastMsg.kind == MessageKind.file
+                        ? (lastMsg.isOutgoing ? 'You: 📎 ${lastMsg.fileName ?? "File"}' : '📎 ${lastMsg.fileName ?? "File"}')
+                        : (lastMsg.isOutgoing ? 'You: ${lastMsg.text}' : lastMsg.text),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                : null,
+            trailing: unread > 0
+                ? CircleAvatar(
+                    radius: 10,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    child: Text('$unread',
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 10)),
+                  )
+                : null,
+            onTap: () => onTap(peerId),
+            onLongPress: () =>
+                _showOptions(context, ref, peerId, displayName),
+          ),
         );
       },
     );
@@ -346,6 +502,8 @@ class _ProfileTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final identity = ref.watch(sessionProvider).identity;
     if (identity == null) return const SizedBox();
+    final blockedUsers = ref.watch(blockedUsersProvider);
+    final knownPeers = ref.watch(knownPeersProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -394,6 +552,27 @@ class _ProfileTab extends ConsumerWidget {
           label: const Text('Log out', style: TextStyle(color: Colors.red)),
           onPressed: () => _confirmLogout(context, ref),
         ),
+        if (blockedUsers.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          const Text('Blocked Users', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          ...blockedUsers.map((uid) {
+            final name = knownPeers[uid]?['display_name'] as String? ?? _shortUserId(uid);
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(child: Text(name[0].toUpperCase())),
+              title: Text(name),
+              subtitle: Text(_shortUserId(uid),
+                  style: const TextStyle(fontSize: 11)),
+              trailing: TextButton(
+                onPressed: () => ref
+                    .read(blockedUsersProvider.notifier)
+                    .update((s) => {...s}..remove(uid)),
+                child: const Text('Unblock'),
+              ),
+            );
+          }),
+        ],
       ],
     );
   }

@@ -50,6 +50,12 @@ class ConversationNotifier extends Notifier<ConversationState> {
   void markFailed(String peerId, String msgId) {
     state = state.updateStatus(peerId, msgId, MessageStatus.failed);
   }
+
+  void removeConversation(String peerId) {
+    final updated = Map<String, List<ChatMessage>>.from(state.byPeer);
+    updated.remove(peerId);
+    state = ConversationState(byPeer: updated);
+  }
 }
 
 final conversationProvider =
@@ -250,12 +256,18 @@ Future<void> _onNoiseInit(Map<String, dynamic> msg, WidgetRef ref) async {
   ref.read(knownPeersProvider.notifier).update((s) => {...s, fromId: peerData});
 
   final peerStaticPubHex = peerData['public_key'] as String? ?? '';
-  final resp = await processNoiseInit(
-    senderStaticPubHex: peerStaticPubHex,
-    ePubHex: msg['e_pub'] as String? ?? '',
-    nonce: msg['nonce'] as String? ?? '',
-    payload: msg['payload'] as String? ?? '',
-  );
+
+  NoiseRespData resp;
+  try {
+    resp = await processNoiseInit(
+      senderStaticPubHex: peerStaticPubHex,
+      ePubHex: msg['e_pub'] as String? ?? '',
+      nonce: msg['nonce'] as String? ?? '',
+      payload: msg['payload'] as String? ?? '',
+    );
+  } catch (_) {
+    return; // Handshake failed — don't crash the queue
+  }
 
   final signPayload = utf8.encode('noise_resp:$fromId:${resp.nonce}:${resp.payload}');
   final sig = await signData(signPayload);
@@ -289,9 +301,11 @@ Future<void> _onNoiseResp(Map<String, dynamic> msg, WidgetRef ref) async {
 Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef ref) async {
   final fromId = msg['from'] as String? ?? '';
 
+  // Silently drop messages from blocked users
+  if (ref.read(blockedUsersProvider).contains(fromId)) return;
+
   // Fetch peer key if unknown
-  final knownPeers = ref.read(knownPeersProvider);
-  if (!knownPeers.containsKey(fromId)) {
+  if (!ref.read(knownPeersProvider).containsKey(fromId)) {
     try {
       final data = await ref.read(apiClientProvider)?.getUser(fromId);
       if (data != null) {
@@ -330,6 +344,19 @@ Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef r
     isOutgoing: false,
     status: MessageStatus.delivered,
   );
+
+  // Route to contact request if sender is not an accepted contact
+  if (!ref.read(acceptedContactsProvider).contains(fromId)) {
+    final peerData = ref.read(knownPeersProvider)[fromId];
+    final displayName = peerData?['display_name'] as String? ?? fromId.substring(0, 12);
+    ref.read(contactRequestsProvider.notifier).addOrAppend(ContactRequest(
+      fromId: fromId,
+      displayName: displayName,
+      pubHex: peerStaticPubHex,
+      messages: [incoming],
+    ));
+    return;
+  }
 
   ref.read(conversationProvider.notifier).addMessage(fromId, incoming);
 }
@@ -400,6 +427,9 @@ Future<String?> sendDM({
   final enc = await encryptMessage(utf8.encode(text), sessionKey);
   final signPayload = utf8.encode('dm:$peerUserId:${enc.nonce}:${enc.ciphertext}:$seq');
   final sig = await signData(signPayload);
+
+  // Mark peer as accepted so their replies come through directly
+  ref.read(acceptedContactsProvider.notifier).update((s) => {...s, peerUserId});
 
   // Optimistic local message
   final outgoing = ChatMessage(

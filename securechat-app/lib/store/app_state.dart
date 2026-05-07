@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:securechat/crypto/identity.dart';
+import 'package:securechat/models/message.dart';
 import 'package:securechat/network/api_client.dart';
 
 // ── Session state ─────────────────────────────────────────────────────────────
@@ -61,3 +62,55 @@ final apiClientProvider = Provider<ApiClient?>((ref) {
   client.setJwt(identity.jwt);
   return client;
 });
+
+// ── Contacts & blocking ───────────────────────────────────────────────────────
+
+// Users whose messages go directly to the conversation (you've messaged them or accepted their request)
+final acceptedContactsProvider = StateProvider<Set<String>>((ref) => {});
+
+// Users whose messages are silently dropped
+final blockedUsersProvider = StateProvider<Set<String>>((ref) => {});
+
+// ── Contact requests ──────────────────────────────────────────────────────────
+
+class ContactRequest {
+  final String fromId;
+  final String displayName;
+  final String pubHex;
+  final List<ChatMessage> messages;
+
+  const ContactRequest({
+    required this.fromId,
+    required this.displayName,
+    required this.pubHex,
+    required this.messages,
+  });
+
+  ContactRequest withMessage(ChatMessage msg) => ContactRequest(
+        fromId: fromId,
+        displayName: displayName,
+        pubHex: pubHex,
+        messages: [...messages, msg],
+      );
+}
+
+class ContactRequestNotifier extends Notifier<List<ContactRequest>> {
+  @override
+  List<ContactRequest> build() => [];
+
+  void addOrAppend(ContactRequest r) {
+    final idx = state.indexWhere((x) => x.fromId == r.fromId);
+    if (idx >= 0) {
+      final updated = List<ContactRequest>.from(state);
+      if (r.messages.isNotEmpty) updated[idx] = updated[idx].withMessage(r.messages.first);
+      state = updated;
+    } else {
+      state = [...state, r];
+    }
+  }
+
+  void remove(String fromId) => state = state.where((r) => r.fromId != fromId).toList();
+}
+
+final contactRequestsProvider =
+    NotifierProvider<ContactRequestNotifier, List<ContactRequest>>(ContactRequestNotifier.new);

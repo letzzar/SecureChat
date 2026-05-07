@@ -45,7 +45,9 @@ class _SecureChatAppState extends ConsumerState<SecureChatApp> {
     _msgQueue = Future.value();
     if (ws == null) return;
     _wsSub = ws.messages.listen((msg) {
-      _msgQueue = _msgQueue.then((_) => dispatchIncoming(msg, ref));
+      _msgQueue = _msgQueue
+          .then((_) => dispatchIncoming(msg, ref))
+          .catchError((_) {}); // Prevent one bad message from stalling the queue
     });
   }
 
