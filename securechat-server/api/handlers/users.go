@@ -8,6 +8,7 @@ import (
 
 	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
+	"github.com/securechat/server/federation"
 )
 
 type registerRequest struct {
@@ -27,6 +28,7 @@ type userResponse struct {
 	DisplayName string `json:"display_name"`
 	PublicKey   string `json:"public_key"`
 	SignPublic  string `json:"sign_public"`
+	ServerURL   string `json:"server_url,omitempty"` // non-empty for federated users
 }
 
 func Register(cfg *config.Config, database *sql.DB) http.HandlerFunc {
@@ -72,8 +74,8 @@ func Register(cfg *config.Config, database *sql.DB) http.HandlerFunc {
 				return
 			}
 		} else {
-			// New user: in private mode require and consume a valid invite token.
-			if cfg.Server.Mode != "public" {
+			// New user: in private/mesh_private mode require and consume a valid invite token.
+			if !cfg.IsPublicReg() {
 				if req.InviteCode == "" {
 					writeError(w, http.StatusForbidden, "invite_required", "An invite code is required to register")
 					return
@@ -138,7 +140,7 @@ func GetUser(database *sql.DB) http.HandlerFunc {
 	}
 }
 
-func SearchUsers(database *sql.DB) http.HandlerFunc {
+func SearchUsers(cfg *config.Config, fedClient *federation.Client, database *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		if q == "" {
@@ -161,6 +163,23 @@ func SearchUsers(database *sql.DB) http.HandlerFunc {
 				SignPublic:  hex.EncodeToString(u.SignPublic),
 			})
 		}
+
+		// In mesh mode, fan-out to federated peers and aggregate results.
+		if cfg.IsMesh() && fedClient != nil {
+			peers, _ := db.GetFederationPeers(database)
+			if len(peers) > 0 {
+				for _, u := range fedClient.SearchUsers(peers, q) {
+					results = append(results, userResponse{
+						UserID:      u.UserID,
+						DisplayName: u.DisplayName,
+						PublicKey:   u.PublicKey,
+						SignPublic:  u.SignPublic,
+						ServerURL:   u.ServerURL,
+					})
+				}
+			}
+		}
+
 		writeJSON(w, http.StatusOK, results)
 	}
 }

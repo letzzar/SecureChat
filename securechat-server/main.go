@@ -10,6 +10,7 @@ import (
 	"github.com/securechat/server/api"
 	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
+	"github.com/securechat/server/federation"
 	"github.com/securechat/server/sfu"
 	"github.com/securechat/server/ws"
 )
@@ -51,6 +52,12 @@ func main() {
 	hub := ws.NewHub()
 
 	sfuInst := sfu.New(nil) // nil = use default Google STUN
+
+	var fedClient *federation.Client
+	if cfg.IsMesh() {
+		fedClient = federation.New()
+		log.Printf("Federation mesh enabled (mode=%s)", cfg.Server.Mode)
+	}
 	sfuInst.SetOnPeerLeft(func(roomID, userID string) {
 		hub.BroadcastRoom(roomID, nil, &ws.OutgoingMessage{
 			Type:   "voice_user_left",
@@ -72,7 +79,7 @@ func main() {
 		}
 	}()
 
-	router := api.NewRouter(cfg, database, hub, sfuInst)
+	router := api.NewRouter(cfg, database, hub, sfuInst, fedClient)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("SecureChat server starting on %s (TLS=%v, mode=%s)", addr, cfg.Server.TLS, cfg.Server.Mode)

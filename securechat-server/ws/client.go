@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/securechat/server/api/handlers"
+	jwtauth "github.com/securechat/server/auth"
 	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
+	"github.com/securechat/server/federation"
 	"github.com/securechat/server/sfu"
 )
 
@@ -37,10 +38,11 @@ type Client struct {
 	database *sql.DB
 	cfg      *config.Config
 	sfu      *sfu.SFU
+	fed      *federation.Client // nil when not in mesh mode
 }
 
 // ServeWS upgrades the HTTP connection and starts the client pump goroutines.
-func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, w http.ResponseWriter, r *http.Request) {
+func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, fedClient *federation.Client, w http.ResponseWriter, r *http.Request) {
 	// Authenticate via JWT query param
 	tokenStr := r.URL.Query().Get("token")
 	if tokenStr == "" {
@@ -48,7 +50,7 @@ func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, w
 		return
 	}
 
-	userID, err := handlers.ValidateJWT(cfg, tokenStr)
+	userID, err := jwtauth.ValidateJWT(cfg, tokenStr)
 	if err != nil {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
@@ -68,6 +70,7 @@ func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, w
 		database: database,
 		cfg:      cfg,
 		sfu:      sfuInst,
+		fed:      fedClient,
 	}
 
 	hub.Register(c)
@@ -96,7 +99,10 @@ func (c *Client) readPump() {
 	for {
 		_, raw, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseGoingAway,
+				websocket.CloseNormalClosure,
+				websocket.CloseAbnormalClosure) {
 				log.Printf("ws read error [%s]: %v", c.userID, err)
 			}
 			break
@@ -175,6 +181,9 @@ func (c *Client) handleMessage(raw []byte) {
 	case "file_accept", "file_reject", "file_cancel", "file_done":
 		c.handleFileRelay(&msg)
 
+	case "dm_call_offer", "dm_call_answer", "dm_call_reject", "dm_call_end", "dm_ice_candidate":
+		c.handleDmCallSignal(&msg)
+
 	default:
 		c.sendError("unknown_type", "Unknown message type: "+msg.Type)
 	}
@@ -205,20 +214,52 @@ func (c *Client) handleDM(msg *IncomingMessage) {
 	delivered := c.hub.Send(msg.To, out)
 
 	if !delivered {
-		// Store for offline delivery (72h TTL)
-		now := time.Now().Unix()
-		_ = db.SaveOfflineMessage(c.database, &db.OfflineMsg{
-			RecipientID: msg.To,
-			MsgType:     msg.Type,
-			FromID:      c.userID,
-			Payload:     msg.Payload,
-			Nonce:       msg.Nonce,
-			Sig:         msg.Sig,
-			Seq:         msg.Seq,
-			EPub:        msg.EPub,
-			CreatedAt:   now,
-			ExpiresAt:   now + int64(c.cfg.Limits.OfflineTTLHours)*3600,
-		})
+		localUser, _ := db.GetUser(c.database, msg.To)
+		if localUser != nil {
+			// Recipient is a local user but currently offline — queue.
+			now := time.Now().Unix()
+			_ = db.SaveOfflineMessage(c.database, &db.OfflineMsg{
+				RecipientID: msg.To,
+				MsgType:     msg.Type,
+				FromID:      c.userID,
+				Payload:     msg.Payload,
+				Nonce:       msg.Nonce,
+				Sig:         msg.Sig,
+				Seq:         msg.Seq,
+				EPub:        msg.EPub,
+				CreatedAt:   now,
+				ExpiresAt:   now + int64(c.cfg.Limits.OfflineTTLHours)*3600,
+			})
+		} else if c.cfg.IsMesh() && c.fed != nil {
+			// Recipient is not local — try to relay to a federated peer.
+			relay := &federation.RelayMsg{
+				Type:    msg.Type,
+				From:    c.userID,
+				To:      msg.To,
+				Nonce:   msg.Nonce,
+				Payload: msg.Payload,
+				Sig:     msg.Sig,
+				Seq:     msg.Seq,
+				Ts:      msg.Ts,
+				EPub:    msg.EPub,
+			}
+			go func() {
+				peers, err := db.GetFederationPeers(c.database)
+				if err != nil || len(peers) == 0 {
+					return
+				}
+				peer, _ := c.fed.LookupUser(peers, msg.To)
+				if peer == nil {
+					log.Printf("federation: no peer has user %s", msg.To)
+					return
+				}
+				if err := c.fed.RelayMessage(peer, relay); err != nil {
+					log.Printf("federation relay to %s: %v", peer.URL, err)
+				} else {
+					db.UpdateFederationPeerSeen(c.database, peer.URL)
+				}
+			}()
+		}
 	}
 
 	// Ack to sender
@@ -433,6 +474,19 @@ func (c *Client) handleFileRelay(msg *IncomingMessage) {
 		Type:   msg.Type,
 		From:   c.userID,
 		FileID: msg.FileID,
+	})
+}
+
+// handleDmCallSignal relays DM voice call signals (offer/answer/reject/end/ice) between two users.
+func (c *Client) handleDmCallSignal(msg *IncomingMessage) {
+	if msg.To == "" {
+		return
+	}
+	c.hub.Send(msg.To, &OutgoingMessage{
+		Type:      msg.Type,
+		From:      c.userID,
+		SDP:       msg.SDP,
+		Candidate: msg.Candidate,
 	})
 }
 

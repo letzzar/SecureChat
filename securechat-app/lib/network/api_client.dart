@@ -139,6 +139,15 @@ class ApiClient {
     return body;
   }
 
+  Future<Map<String, dynamic>> getFederation() async {
+    final resp = await http.get(
+      Uri.parse('$baseUrl/api/v1/federation'),
+      headers: _headers,
+    );
+    if (resp.statusCode != 200) return {};
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> searchRooms(String query) async {
     final resp = await http.get(
       Uri.parse('$baseUrl/api/v1/rooms?q=${Uri.encodeQueryComponent(query)}'),

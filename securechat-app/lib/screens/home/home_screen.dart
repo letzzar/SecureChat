@@ -154,11 +154,42 @@ class _DirectMessagesTabState extends ConsumerState<_DirectMessagesTab> {
               itemCount: _searchResults.length,
               itemBuilder: (_, i) {
                 final u = _searchResults[i];
+                final serverUrl = u['server_url'] as String? ?? '';
+                final isFederated = serverUrl.isNotEmpty;
                 return ListTile(
                   leading: CircleAvatar(
                     child: Text((u['display_name'] as String)[0].toUpperCase()),
                   ),
-                  title: Text(u['display_name'] as String),
+                  title: Row(
+                    children: [
+                      Text(u['display_name'] as String),
+                      if (isFederated) ...[
+                        const SizedBox(width: 6),
+                        Tooltip(
+                          message: serverUrl,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .secondaryContainer,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              Uri.tryParse(serverUrl)?.host ?? serverUrl,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSecondaryContainer,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                   subtitle: Text(
                     '${(u['user_id'] as String).substring(0, 16)}...',
                     style: const TextStyle(fontSize: 11),
@@ -507,6 +538,7 @@ class _ProfileTab extends ConsumerWidget {
     if (identity == null) return const SizedBox();
     final blockedUsers = ref.watch(blockedUsersProvider);
     final knownPeers = ref.watch(knownPeersProvider);
+    final fedServers = ref.watch(federatedServersProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -555,6 +587,28 @@ class _ProfileTab extends ConsumerWidget {
           label: const Text('Log out', style: TextStyle(color: Colors.red)),
           onPressed: () => _confirmLogout(context, ref),
         ),
+        if (fedServers.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          const Text('Federated Servers',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(
+            'Your server is connected to these nodes. Messages are routed automatically.',
+            style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          ...fedServers.map((s) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.hub_outlined),
+                title: Text(s.name.isNotEmpty ? s.name : s.url),
+                subtitle: Text(
+                  Uri.tryParse(s.url)?.host ?? s.url,
+                  style: const TextStyle(fontSize: 11),
+                ),
+              )),
+        ],
         if (blockedUsers.isNotEmpty) ...[
           const SizedBox(height: 32),
           const Text('Blocked Users', style: TextStyle(fontWeight: FontWeight.w600)),

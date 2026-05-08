@@ -63,6 +63,51 @@ final apiClientProvider = Provider<ApiClient?>((ref) {
   return client;
 });
 
+// ── Federation ────────────────────────────────────────────────────────────────
+
+class FederationServer {
+  final String url;
+  final String name;
+  final int consecutiveFailures;
+  final int lastSuccessMs;
+
+  const FederationServer({
+    required this.url,
+    required this.name,
+    this.consecutiveFailures = 0,
+    this.lastSuccessMs = 0,
+  });
+
+  /// Higher score = try first. Decays with failures and time.
+  double get score {
+    final ageSec = (DateTime.now().millisecondsSinceEpoch - lastSuccessMs) / 1000;
+    final recency = lastSuccessMs == 0 ? 0.1 : 1.0 / (1 + ageSec / 3600);
+    return recency / (consecutiveFailures + 1);
+  }
+
+  FederationServer withFailure() => FederationServer(
+        url: url,
+        name: name,
+        consecutiveFailures: consecutiveFailures + 1,
+        lastSuccessMs: lastSuccessMs,
+      );
+
+  FederationServer withSuccess() => FederationServer(
+        url: url,
+        name: name,
+        consecutiveFailures: 0,
+        lastSuccessMs: DateTime.now().millisecondsSinceEpoch,
+      );
+
+  static FederationServer fromJson(Map<String, dynamic> j) => FederationServer(
+        url: j['url'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+      );
+}
+
+final federatedServersProvider =
+    StateProvider<List<FederationServer>>((ref) => []);
+
 // ── Contacts & blocking ───────────────────────────────────────────────────────
 
 // Users whose messages go directly to the conversation (you've messaged them or accepted their request)

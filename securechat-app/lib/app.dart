@@ -44,6 +44,17 @@ class _SecureChatAppState extends ConsumerState<SecureChatApp> {
     _wsSub?.cancel();
     _msgQueue = Future.value();
     if (ws == null) return;
+
+    // Fetch federation peer list so the UI can show backup servers.
+    ref.read(apiClientProvider)?.getFederation().then((info) {
+      final peers = (info['peers'] as List? ?? []).cast<Map<String, dynamic>>();
+      final servers = peers
+          .map((p) => FederationServer.fromJson(p))
+          .where((s) => s.url.isNotEmpty)
+          .toList();
+      ref.read(federatedServersProvider.notifier).state = servers;
+    }).catchError((_) {});
+
     _wsSub = ws.messages.listen((msg) {
       _msgQueue = _msgQueue
           .then((_) => dispatchIncoming(msg, ref))

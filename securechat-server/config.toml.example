@@ -4,7 +4,7 @@ port = 8080
 tls  = false
 # cert = "/etc/securechat/cert.pem"
 # key  = "/etc/securechat/key.pem"
-mode = "private"   # "private" = invite-only registration | "public" = open registration
+mode = "private"   # "private" | "public" | "mesh_private" | "mesh_public"
 
 [database]
 path = "./data.db"
@@ -23,3 +23,19 @@ ttl_days = 30
 enabled = false
 url     = ""
 secret  = ""
+
+# ── Federation (required only when mode = "mesh_*") ──────────────────────────
+#
+# [federation]
+# name        = "My SecureChat Node"
+# public_url  = "https://my.server.example.com"   # externally reachable URL, no trailing slash
+# secret      = "CHANGE_ME_peers_send_this_to_call_our_s2s_endpoints"
+# admin_token = "CHANGE_ME_to_manage_peers_via_api"
+#
+# Add a peer (run once per peer):
+#   curl -X POST https://my.server.example.com/api/v1/admin/federation/peers \
+#        -H "X-Admin-Token: <admin_token>" \
+#        -H "Content-Type: application/json" \
+#        -d '{"url":"https://peer.example.com","name":"Peer Node","secret":"<peer_federation_secret>"}'
+#
+# The "secret" in the JSON body is the PEER's federation.secret, not yours.

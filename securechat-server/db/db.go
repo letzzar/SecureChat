@@ -71,6 +71,15 @@ func migrate(db *sql.DB) error {
 			expires_at INTEGER NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS federation_peers (
+			id        INTEGER PRIMARY KEY AUTOINCREMENT,
+			url       TEXT NOT NULL UNIQUE,
+			name      TEXT NOT NULL DEFAULT '',
+			secret    TEXT NOT NULL DEFAULT '',
+			added_at  INTEGER NOT NULL,
+			last_seen INTEGER
+		);
+
 		CREATE INDEX IF NOT EXISTS idx_offline_recipient ON offline_messages(recipient_id);
 		CREATE INDEX IF NOT EXISTS idx_offline_expires   ON offline_messages(expires_at);
 		CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_id);
