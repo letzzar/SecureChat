@@ -7,6 +7,7 @@ import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/messages_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/store/voice_store.dart';
+import 'package:securechat/widgets/emoji_input_bar.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -242,7 +243,7 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
                     ),
                   ),
           ),
-          _InputBar(controller: _textCtrl, onSend: _send, onAttach: _sendFile),
+          EmojiInputBar(controller: _textCtrl, onSend: _send, onAttach: _sendFile),
         ],
       ),
     );
@@ -475,49 +476,3 @@ class _VoiceBar extends ConsumerWidget {
   }
 }
 
-class _InputBar extends StatelessWidget {
-  final TextEditingController controller;
-  final VoidCallback onSend;
-  final VoidCallback onAttach;
-  const _InputBar({required this.controller, required this.onSend, required this.onAttach});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.attach_file),
-              tooltip: 'Send file',
-              onPressed: onAttach,
-            ),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  hintText: 'Message...',
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                ),
-                onSubmitted: (_) => onSend(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              icon: const Icon(Icons.send),
-              onPressed: onSend,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

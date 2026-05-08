@@ -32,6 +32,7 @@ dependencies:
 
   # Voice
   flutter_webrtc: ^0.9.47
+  emoji_picker_flutter: ^2.2.0
 
 dev_dependencies:
   flutter_test:

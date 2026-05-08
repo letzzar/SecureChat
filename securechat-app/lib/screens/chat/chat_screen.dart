@@ -5,6 +5,7 @@ import 'package:securechat/store/app_state.dart';
 import 'package:securechat/store/dm_voice_store.dart';
 import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/messages_store.dart';
+import 'package:securechat/widgets/emoji_input_bar.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String peerUserId;
@@ -157,7 +158,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               child: Text(_error!,
                   style: TextStyle(color: colorScheme.onErrorContainer, fontSize: 12)),
             ),
-          _InputBar(
+          EmojiInputBar(
             controller: _inputController,
             sending: _sending,
             onSend: _send,
@@ -490,67 +491,3 @@ class _DmCallBar extends ConsumerWidget {
   }
 }
 
-// ── Input bar ─────────────────────────────────────────────────────────────────
-
-class _InputBar extends StatelessWidget {
-  final TextEditingController controller;
-  final bool sending;
-  final VoidCallback onSend;
-  final VoidCallback onAttach;
-
-  const _InputBar({
-    required this.controller,
-    required this.sending,
-    required this.onSend,
-    required this.onAttach,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.attach_file),
-              tooltip: 'Send file',
-              onPressed: onAttach,
-            ),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                minLines: 1,
-                maxLines: 5,
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: 'Message',
-                  filled: true,
-                  fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: sending ? null : onSend,
-              icon: sending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.send),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
