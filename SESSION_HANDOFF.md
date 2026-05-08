@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-05-07 (sesión Mac — tarde → pasa a Windows)
+**Última actualización:** 2026-05-08 (sesión Windows — completadas mejoras de UX + llamadas DM)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -17,43 +17,32 @@
 | 2 | Mensajería directa E2E (Noise_IK + ChaCha20) | ✅ Completo |
 | 3 | Salas de chat grupales (Argon2id + room_key) | ✅ Completo |
 | 3b | Sistema de invitaciones (bootstrap token + user invites) | ✅ Completo |
-| 4 | Voz WebRTC (SFU en Go + flutter_webrtc en Flutter) | ✅ Completo |
+| 4 | Voz WebRTC — salas (SFU en Go + flutter_webrtc) | ✅ Completo |
 | 4b | Portado a macOS desktop + Windows desktop | ✅ Completo |
-| 4c | Modo público/privado + transferencia de archivos (relay WS) | ✅ Servidor — cliente pendiente |
+| 4c | Transferencia de archivos (DM + salas, relay WS E2E) | ✅ Completo |
+| 4d | Solicitudes de contacto, bloqueo, menú contextual chats | ✅ Completo |
+| 4e | Llamadas de voz 1-1 (P2P WebRTC, señalización vía servidor) | ✅ Completo |
+| 4f | Tick de confirmación servidor, nombre en lista de chats | ✅ Completo |
 
-### Completado en sesión Mac 2026-05-07
+### Completado en sesión 2026-05-07/08
 
-- [x] Modo público/privado: `config.toml` → `mode = "private"` | `"public"`
-  - Privado: registro requiere invite code; Público: registro libre
-- [x] Transferencia de archivos por WebSocket (relay E2E cifrado, solo usuarios online)
-  - Mensajes: `file_offer`, `file_accept`, `file_reject`, `file_cancel`, `file_chunk`, `file_done`, `file_error`
-  - Servidor implementado — UI en cliente Flutter **pendiente**
-- [x] **Build macOS funcional** — resueltos dos bugs de compilación/runtime:
-  1. **BOM UTF-8** en archivos generados desde Windows (`project.pbxproj`, `AppInfo.xcconfig`, `Runner.rc`) → eliminados con Python (3 bytes `EF BB BF` al inicio de cada archivo)
-  2. **Error Keychain -34018** (`errSecMissingEntitlement`) → causa raíz: el plugin `flutter_secure_storage_macos` 3.1.3 usa `kSecUseDataProtectionKeychain = true` por defecto, lo que requiere el entitlement `keychain-access-groups` incluso sin sandbox. Fix: añadir `MacOsOptions(useDataProtectionKeyChain: false)` en los tres sitios donde se instancia `FlutterSecureStorage`:
-     - `lib/crypto/identity.dart`
-     - `lib/crypto/noise_handshake.dart`
-     - `lib/crypto/signatures.dart`
-  - Sandbox también eliminado de `DebugProfile.entitlements` y `Release.entitlements` (innecesario para app privada fuera del App Store)
+**Servidor (`ws/client.go`):**
+- [x] Relay de señales de llamada DM: `dm_call_offer/answer/reject/end/dm_ice_candidate`
+- [x] Suprimido error log 1006 (cierre normal del cliente)
+- [x] Recompilado: `securechat-server-windows-amd64.exe`
 
-### Completado en sesión Windows 2026-05-06
-
-- [x] Flutter 3.41.9 instalado en `D:\flutter`, bin en PATH
-- [x] Android SDK configurado (`ANDROID_HOME`, licencias aceptadas)
-- [x] `AndroidManifest.xml` con permisos de audio, cámara, internet
-- [x] Proyecto copiado a `D:\SecureChat` (unidad NTFS local)
+**Cliente Flutter:**
+- [x] `lib/store/dm_voice_store.dart` — nuevo: gestión completa de llamadas P2P 1-1
+- [x] `lib/screens/chat/chat_screen.dart` — botón de llamada en AppBar, barra `_DmCallBar` (estados: llamando/sonando/en llamada), tick simple (✓) al confirmar el servidor
+- [x] `lib/store/messages_store.dart` — tracking de `_pendingSeqs`, ack `delivered_seq` funcional, dispatch `dm_call_*`
+- [x] `lib/screens/home/home_screen.dart` — `_openChat` guarda datos completos del usuario en `knownPeers` (fix nombre en lista)
+- [x] `sendDM` ya no sobreescribe `display_name` en `knownPeers`
 
 ### Pendiente inmediato — PRÓXIMOS PASOS
 
-- [ ] **Build Windows**: desde `D:\SecureChat\securechat-app` con VS 2026 + ATL instalado — **aplicar los mismos cambios Dart del fix de Keychain** (ya están en el NAS, sincronizar con robocopy antes de compilar)
-- [ ] **Pruebas Mac ↔ PC**: servidor corriendo en Windows, Mac apuntando a IP del PC
-- [ ] **UI transferencia de archivos** en cliente Flutter
-- [ ] Fase 5: pulido y seguridad (ver abajo)
-
-> **Nota para Windows:** antes de compilar, sincronizar desde NAS:
-> ```powershell
-> robocopy "Y:\Mi software\SecureChat" "D:\SecureChat" /E /XD ".dart_tool" "build" /NFL /NDL
-> ```
+- [ ] **Pruebas Mac ↔ PC**: servidor en Windows, Mac apuntando a IP del PC — validar llamadas DM end-to-end
+- [ ] Indicador persistente en HomeScreen mientras se está en un canal de voz de sala
+- [ ] Fase 5: ver tabla abajo
 
 ---
 
@@ -73,18 +62,44 @@
 
 | Herramienta | Ubicación |
 |---|---|
-| Flutter SDK | `D:\flutter` (bin en PATH usuario) |
+| Flutter SDK | `D:\Program Files\flutter\bin` |
+| Go binary | `D:\Program Files\Go\bin\go.exe` (¡no en C:\!) |
+| GCC (CGO) | `C:\Users\letzz\mingw64\bin\` |
 | Android SDK | `C:\Users\letzz\AppData\Local\Android\Sdk` |
-| Visual Studio Community 2026 | Instalado con componente ATL de C++ |
-| Visual Studio 2022 Community | `C:\Program Files\Microsoft Visual Studio\2022\Community` |
-| Proyecto (trabajo) | `D:\SecureChat\securechat-app` |
+| Visual Studio 2022 | `C:\Program Files\Microsoft Visual Studio\2022\Community` |
+| Proyecto (trabajo) | `D:\SecureChat\` |
 | Proyecto (backup NAS) | `Y:\Mi software\SecureChat` |
 
-**Por qué D:\SecureChat en Windows:** `Y:\` es NAS — Windows no permite symlinks en red y Flutter los necesita. Todos los builds en Windows deben hacerse desde `D:\SecureChat`.
+**Por qué D:\SecureChat:** `Y:\` es NAS — no soporta symlinks. Flutter los requiere.
 
-Sincronizar de D: al NAS tras cambios:
+### Comandos de build
+
 ```powershell
+# Flutter Windows
+cd D:\SecureChat\securechat-app
+$env:PATH = "D:\Program Files\flutter\bin;$env:PATH"
+flutter build windows --release
+
+# Servidor Go (CGO obligatorio para sqlite3)
+cd D:\SecureChat\securechat-server
+$env:CGO_ENABLED = "1"
+$env:PATH = "C:\Users\letzz\mingw64\bin;D:\Program Files\Go\bin;$env:PATH"
+& "D:\Program Files\Go\bin\go.exe" build -o securechat-server-windows-amd64.exe .
+```
+
+```bash
+# macOS
+cd "/Users/Letzzar/Mi Software/SecureChat/securechat-app"
+flutter build macos --release
+```
+
+### Sync NAS ↔ local
+
+```powershell
+# D: → NAS (tras cambios en PC)
 robocopy "D:\SecureChat" "Y:\Mi software\SecureChat" /E /XD ".dart_tool" "build" /NFL /NDL
+# NAS → D: (al retomar en PC desde Mac)
+robocopy "Y:\Mi software\SecureChat" "D:\SecureChat" /E /XD ".dart_tool" "build" /NFL /NDL
 ```
 
 ---
@@ -114,33 +129,24 @@ SecureChat/
 │   └── api/ ws/ sfu/ db/ crypto/
 └── securechat-app/           # Flutter app
     ├── pubspec.yaml
-    └── lib/ ios/ android/ macos/ windows/
-```
-
----
-
-## Comandos de build
-
-```bash
-# macOS (desde Mac)
-cd "/Users/Letzzar/Mi Software/SecureChat/securechat-app"
-flutter build macos --release
-# → build/macos/Build/Products/Release/securechat.app
-
-# Windows (desde PC)
-cd D:\SecureChat\securechat-app
-D:\flutter\bin\flutter.bat build windows --release
-# → build\windows\x64\runner\Release\securechat.exe
-
-# Android (desde cualquier máquina con Android SDK)
-flutter build apk --release
-```
-
-Si `flutter build macos` falla:
-```bash
-flutter doctor          # diagnosticar
-xcode-select --install  # si faltan Xcode CLI tools
-cd macos && pod install && cd .. && flutter build macos --release  # si falla pods
+    └── lib/
+        ├── store/
+        │   ├── app_state.dart        # session, knownPeers, contacts, blocked
+        │   ├── messages_store.dart   # conversación, sendDM, dispatchIncoming
+        │   ├── rooms_store.dart      # salas
+        │   ├── voice_store.dart      # voz en salas (SFU)
+        │   ├── dm_voice_store.dart   # llamadas DM P2P (nuevo)
+        │   └── file_transfer_store.dart
+        ├── screens/
+        │   ├── chat/chat_screen.dart
+        │   ├── home/home_screen.dart
+        │   └── rooms/
+        ├── crypto/
+        │   ├── secure_kv.dart        # wrapper storage (macOS: file, otros: secure_storage)
+        │   ├── identity.dart
+        │   ├── noise_handshake.dart
+        │   └── signatures.dart
+        └── voice/voice_client.dart   # WebRTC para salas
 ```
 
 ---
@@ -153,10 +159,9 @@ cd macos && pod install && cd .. && flutter build macos --release  # si falla po
 26. Exportación/importación de identidad (BIP39)
 27. Notificaciones push (FCM / APNs)
 28. Tests de integración end-to-end
-29. Indicador persistente en HomeScreen cuando se está en canal de voz
+29. Indicador persistente en HomeScreen cuando se está en canal de voz de sala
 30. Icono de la app (LogoSecureChat.png en carpeta icons/)
-31. UI de transferencia de archivos en cliente Flutter
-32. TLS / HTTPS para producción
+31. TLS / HTTPS para producción
 ```
 
 ---
