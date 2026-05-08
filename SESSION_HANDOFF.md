@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-05-08 (sesión Windows — completadas mejoras de UX + llamadas DM)
+**Última actualización:** 2026-05-08 (sesión Windows — federación, emoji picker, SERVER.md)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -23,6 +23,8 @@
 | 4d | Solicitudes de contacto, bloqueo, menú contextual chats | ✅ Completo |
 | 4e | Llamadas de voz 1-1 (P2P WebRTC, señalización vía servidor) | ✅ Completo |
 | 4f | Tick de confirmación servidor, nombre en lista de chats | ✅ Completo |
+| 4g | Emoji picker en todos los chats | ✅ Completo |
+| 4h | Federación de servidores (4 modos: public/private/mesh_public/mesh_private) | ✅ Completo |
 
 ### Completado en sesión 2026-05-07/08
 
@@ -38,9 +40,35 @@
 - [x] `lib/screens/home/home_screen.dart` — `_openChat` guarda datos completos del usuario en `knownPeers` (fix nombre en lista)
 - [x] `sendDM` ya no sobreescribe `display_name` en `knownPeers`
 
+**Sesión 2026-05-08 (federación + emoji + docs):**
+
+*Servidor:*
+- [x] `auth/jwt.go` — nuevo paquete para romper ciclo de imports `ws ↔ api/handlers`
+- [x] `config/config.go` — `[federation]` config + `IsMesh()` / `IsPublicReg()` + 4 modos
+- [x] `db/federation.go` — CRUD `federation_peers` en SQLite
+- [x] `federation/client.go` — fan-out search, lookup, relay S2S
+- [x] `api/handlers/federation.go` — endpoints públicos, admin y S2S
+- [x] `api/handlers/users.go` — `SearchUsers` fan-out en modo mesh, `server_url` en respuesta
+- [x] `ws/client.go` — `handleDM` enruta a peers remotos vía relay federation
+- [x] `api/router.go` — registra todas las rutas federation + S2S
+
+*Cliente:*
+- [x] `lib/widgets/emoji_input_bar.dart` — widget compartido con emoji picker (toggle teclado ↔ emojis)
+- [x] `lib/screens/chat/chat_screen.dart` — usa `EmojiInputBar`
+- [x] `lib/screens/rooms/room_chat_screen.dart` — usa `EmojiInputBar`
+- [x] `lib/store/app_state.dart` — `FederationServer` + `federatedServersProvider`
+- [x] `lib/app.dart` — fetches peer list en connect, almacena en `federatedServersProvider`
+- [x] `lib/network/api_client.dart` — `getFederation()`
+- [x] `lib/screens/home/home_screen.dart` — badge servidor en resultados, sección "Federated Servers" en perfil
+
+*Docs:*
+- [x] `SERVER.md` — guía bilingüe (EN/ES) de administración del servidor
+- [x] `CHANGELOG.md` — actualizado con emoji, federación y SERVER.md
+
 ### Pendiente inmediato — PRÓXIMOS PASOS
 
 - [ ] **Pruebas Mac ↔ PC**: servidor en Windows, Mac apuntando a IP del PC — validar llamadas DM end-to-end
+- [ ] **Prueba federación**: dos instancias del servidor con `mode = "mesh_private"`, peering vía curl, buscar y mensajear entre nodos
 - [ ] Indicador persistente en HomeScreen mientras se está en un canal de voz de sala
 - [ ] Fase 5: ver tabla abajo
 
@@ -122,25 +150,29 @@ SecureChat/
 ├── SECURECHAT_DESIGN.md
 ├── SESSION_HANDOFF.md       ← nexo Mac ↔ Windows (este archivo)
 ├── CLAUDE.md
+├── CHANGELOG.md
+├── SERVER.md                 ← guía bilingüe de administración del servidor
 ├── securechat-server/        # Servidor Go
 │   ├── main.go
-│   ├── config.toml
+│   ├── config.toml           # mode puede ser: public/private/mesh_public/mesh_private
 │   ├── securechat-server-windows-amd64.exe
-│   └── api/ ws/ sfu/ db/ crypto/
+│   └── api/ ws/ sfu/ db/ crypto/ auth/ federation/
 └── securechat-app/           # Flutter app
     ├── pubspec.yaml
     └── lib/
         ├── store/
-        │   ├── app_state.dart        # session, knownPeers, contacts, blocked
+        │   ├── app_state.dart        # session, knownPeers, contacts, blocked, federation
         │   ├── messages_store.dart   # conversación, sendDM, dispatchIncoming
         │   ├── rooms_store.dart      # salas
         │   ├── voice_store.dart      # voz en salas (SFU)
-        │   ├── dm_voice_store.dart   # llamadas DM P2P (nuevo)
+        │   ├── dm_voice_store.dart   # llamadas DM P2P
         │   └── file_transfer_store.dart
         ├── screens/
         │   ├── chat/chat_screen.dart
         │   ├── home/home_screen.dart
         │   └── rooms/
+        ├── widgets/
+        │   └── emoji_input_bar.dart  # input bar compartido con emoji picker
         ├── crypto/
         │   ├── secure_kv.dart        # wrapper storage (macOS: file, otros: secure_storage)
         │   ├── identity.dart
@@ -161,7 +193,8 @@ SecureChat/
 28. Tests de integración end-to-end
 29. Indicador persistente en HomeScreen cuando se está en canal de voz de sala
 30. Icono de la app (LogoSecureChat.png en carpeta icons/)
-31. TLS / HTTPS para producción
+31. TLS / HTTPS para producción (documentado en SERVER.md)
+32. Failover automático del cliente a servidor federado de backup
 ```
 
 ---
