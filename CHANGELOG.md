@@ -9,6 +9,32 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ---
 
+## 2026-05-08 — Federation mesh, emoji picker, server guide
+
+### Added
+- **Federated server mesh** — Servers can now form a mesh network (`mode = "mesh_public"` or `"mesh_private"`).
+  - New `[federation]` config section: `name`, `public_url`, `secret`, `admin_token`.
+  - S2S API: `/api/v1/s2s/message` relays DMs between nodes; `/api/v1/s2s/search` fans out user search.
+  - Admin API: `POST/DELETE /api/v1/admin/federation/peers` to manage peer list.
+  - Public API: `GET /api/v1/federation` returns node info and peer list to clients.
+  - `federation/client.go`: concurrent fan-out search, sequential peer lookup, message relay with `X-Federation-Secret` auth.
+  - Client auto-fetches peer list on connect and shows federated users with a server badge in search results.
+  - `FederationServer` in `app_state.dart` with priority score (recency × failure decay) for future failover.
+- **4 server modes** — `public` (open registration), `private` (invite-only), `mesh_public`, `mesh_private`. `IsPublicReg()` / `IsMesh()` helpers in `config.go`.
+- **Emoji picker** — Dedicated emoji panel in all chat inputs (DM and group rooms).
+  - New shared `EmojiInputBar` widget replaces the private `_InputBar` in both chat screens.
+  - Emoji button toggles between system keyboard and the `emoji_picker_flutter` panel (256 px, animated collapse).
+  - Tapping the text field while the emoji panel is open automatically switches back to the keyboard.
+- **SERVER.md** — Bilingual (English / Spanish) server administration guide covering: Quick Start, full `config.toml` reference, server modes table, TLS setup (native cert, nginx reverse proxy, Let's Encrypt, self-signed), federation mesh with step-by-step curl commands, TURN server, Linux production deployment (systemd), Windows deployment (NSSM), security checklist, API endpoint reference, and troubleshooting.
+
+### Changed
+- `auth/jwt.go` new package extracts `IssueJWT` / `ValidateJWT` / `Claims` from `api/handlers` to break the `ws ↔ api/handlers` import cycle introduced by federation.
+- `db/db.go`: `migrate()` now creates the `federation_peers` table.
+- `api/handlers/users.go`: `SearchUsers` fans out to mesh peers in mesh mode; response includes `server_url` for remote users.
+- `ws/client.go`: `handleDM` routes to remote peer via federation relay when recipient is not local and mode is mesh.
+
+---
+
 ## 2026-05-08
 
 ### Added
