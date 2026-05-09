@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-05-08 (sesión Windows — federación, emoji picker, SERVER.md)
+**Última actualización:** 2026-05-09 (sesión cerrada — todo en GitHub main, proyecto pausado)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
