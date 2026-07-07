@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-07-07 (endurecimiento de seguridad + CI + modernización de deps — todo en GitHub main, CI 7/7 verde)
+**Última actualización:** 2026-07-07 (seguridad + CI 7/7 verde + deps modernizadas + Release v0.5.0 publicada + workflow de releases)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -54,7 +54,13 @@ Auditoría del diseño (§13) contra el código y cierre de todos los huecos. De
 
 **Pendiente de validar en dispositivo:** voz E2E (prueba positiva/negativa del `_ratchetSalt`), llamadas DM y emoji picker tras el salto de `flutter_webrtc` 0.9→1.5.
 
-**Nota de sincronización:** la copia en `/Volumes/...` es backup del NAS; se había quedado atrás respecto al `main` de GitHub y se resincronizó. Trabajar siempre desde `origin/main`.
+**Distribución (Releases):**
+- [x] **Release `v0.5.0` publicada** con los 7 binarios: https://github.com/letzzar/SecureChat/releases/tag/v0.5.0
+  (Android APK, iOS sin firmar, macOS/Windows zip, servidor Linux/macOS/Windows)
+- [x] `.github/workflows/release.yml` — al hacer push de un tag `v*` compila las 7 plataformas y publica la Release automáticamente. Uso: `git tag v0.6.0 && git push origin v0.6.0`. Tags con guion (`v1.0.0-rc1`) → prerelease. **El job `publish` aún no se ha ejecutado end-to-end** (los pasos de build sí están probados en verde).
+- Los binarios de la CI normal viven como *artifacts* de cada run (pestaña Actions), no en Releases; caducan a 90 días.
+
+**Nota de sincronización:** la copia en `/Volumes/...` es backup del NAS; se había quedado atrás respecto al `main` de GitHub y se resincronizó. Trabajar siempre desde `origin/main`. HEAD al cerrar: `3819e97`.
 
 ### Completado en sesión 2026-05-07/08
 
