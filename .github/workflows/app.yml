@@ -27,9 +27,10 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          # Pinned: the project's plugins (flutter_webrtc 0.9.48, file_picker
-          # 6.x) use the v1 Android embedding removed in Flutter 3.29+.
-          flutter-version: 3.24.5
+          # Pinned to the 3.27 window: the app code uses Color.withValues (added
+          # in 3.27) while the plugins (flutter_webrtc 0.9.48, file_picker 6.x)
+          # use the v1 Android embedding removed in 3.29+.
+          flutter-version: 3.27.4
           cache: true
       - run: flutter pub get
       - run: flutter build apk --release
@@ -46,9 +47,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          # Pinned: the project's plugins (flutter_webrtc 0.9.48, file_picker
-          # 6.x) use the v1 Android embedding removed in Flutter 3.29+.
-          flutter-version: 3.24.5
+          # Pinned to the 3.27 window: the app code uses Color.withValues (added
+          # in 3.27) while the plugins (flutter_webrtc 0.9.48, file_picker 6.x)
+          # use the v1 Android embedding removed in 3.29+.
+          flutter-version: 3.27.4
           cache: true
       - run: flutter pub get
       # No signing certs in CI: build without code signing.
@@ -70,9 +72,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          # Pinned: the project's plugins (flutter_webrtc 0.9.48, file_picker
-          # 6.x) use the v1 Android embedding removed in Flutter 3.29+.
-          flutter-version: 3.24.5
+          # Pinned to the 3.27 window: the app code uses Color.withValues (added
+          # in 3.27) while the plugins (flutter_webrtc 0.9.48, file_picker 6.x)
+          # use the v1 Android embedding removed in 3.29+.
+          flutter-version: 3.27.4
           cache: true
       - run: flutter config --enable-macos-desktop
       - run: flutter pub get
@@ -94,9 +97,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          # Pinned: the project's plugins (flutter_webrtc 0.9.48, file_picker
-          # 6.x) use the v1 Android embedding removed in Flutter 3.29+.
-          flutter-version: 3.24.5
+          # Pinned to the 3.27 window: the app code uses Color.withValues (added
+          # in 3.27) while the plugins (flutter_webrtc 0.9.48, file_picker 6.x)
+          # use the v1 Android embedding removed in 3.29+.
+          flutter-version: 3.27.4
           cache: true
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get
