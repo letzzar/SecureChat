@@ -9,6 +9,77 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ---
 
+## 2026-07-07 — Security hardening, forward secrecy, E2E voice, CI, dependency modernization
+
+Security audit of the design (`SECURECHAT_DESIGN.md` §13) against the code, then
+closed every gap found. All changes verified: server `go build`/`go test`,
+Flutter `analyze` + handshake unit tests, and a full green CI matrix.
+
+### Security
+- **Ed25519 signatures are now actually verified.** Previously the field was
+  present but never checked, so the anti-spam / anti-impersonation guarantee was
+  a no-op end to end.
+  - Server (`crypto/verify.go`, `ws/client.go`): caches the sender's
+    `sign_public` at connect and verifies the signature over
+    `"<type>:<to>:<nonce>:<payload>"` (`:<seq>` for `dm`) before relaying or
+    queuing — invalid signatures are rejected (`invalid_sig`).
+  - Client (`store/messages_store.dart` `_onDM`): verifies the sender's
+    signature before showing a DM; drops unauthenticated/tampered messages.
+- **Forward secrecy in the Noise handshake** (`crypto/noise_handshake.dart`).
+  The responder now contributes an ephemeral key, so the session key is
+  `BLAKE2s(es‖ss‖ee‖se)`. A later compromise of either static key no longer
+  reveals past sessions. Pure `computeSessionKey()` core with unit tests
+  (`test/noise_handshake_test.dart`). Trade-off: the first DM is queued and sent
+  after the handshake round-trips (`_pendingSends`), so a message to an offline
+  peer waits locally until the handshake completes.
+- **End-to-end encrypted voice** (`voice/voice_client.dart`). Audio frames are
+  encrypted with the room key via WebRTC insertable streams (`FrameCryptor`,
+  AES-GCM, shared key + fixed salt) before SRTP, so the SFU forwards opaque
+  frames and cannot hear the audio. `voice_store.dart` fails closed if the room
+  key is missing.
+- **TLS 1.3 enforced** (`main.go`): `http.Server` with
+  `MinVersion: tls.VersionTLS13`; warns when started without TLS.
+- **Rate limiting** (`ws/client.go`): 100 messages/minute per connection.
+- **Identity binding** (`api/handlers/users.go`): `/register` now rejects a
+  `user_id` that is not `BLAKE2s(public_key)`.
+- **Room authorization** (`ws/client.go`): `room_msg` and `voice_join` require
+  the room to exist. Server-side password-of-room verification remains a design
+  limitation (the server never sees `room_key`).
+- **WebSocket origin check** (`ws/client.go`): `CheckOrigin` accepts native
+  clients (no Origin) and same-host web origins instead of allowing any origin.
+- **JWT secret guard** (`main.go`): the server refuses to start if `jwt.secret`
+  is empty or the placeholder `change_me_in_production`.
+
+### Changed
+- **Re-join rooms on reconnect** (`network/ws_client.dart`,
+  `store/rooms_store.dart`): a new `onConnected` hook re-sends `room_join` for
+  every joined room after each (re)connect. Also fixes a pre-existing bug where
+  room chat went silent after any WebSocket reconnect.
+- **Dependencies modernized** so the Android APK builds on current Flutter:
+  - `emoji_picker_flutter` 2.2.0 → 4.x (unblocks `web ^1.0.0`, which had capped
+    `flutter_webrtc`).
+  - `flutter_webrtc` 0.9.48 → 1.5.2 (drops the v1 Android embedding removed in
+    Flutter 3.29+; FrameCryptor API unchanged).
+  - `file_picker` 6.1.1 → 8.x.
+  - Android `minSdk` raised to 23 (required by flutter_webrtc 1.x).
+  - Removed the stale committed `ios/macos` `Podfile.lock` (pinned
+    flutter_webrtc 0.9.36 / WebRTC-SDK 114.5735.08); CI regenerates them.
+
+### Added
+- **CI — GitHub Actions.** `.github/workflows/server.yml` builds the Go server
+  natively (CGO/sqlite) for Linux, macOS and Windows. `.github/workflows/app.yml`
+  builds the Flutter app for Android (APK), iOS (unsigned), macOS and Windows.
+  Both upload artifacts and run on push / PR / manual dispatch.
+
+### Notes
+- The whole hardening was rebased onto the canonical GitHub `main`; the working
+  copy at `/Volumes/...` (NAS backup) had lagged behind and was resynced.
+- Voice E2E and the big `flutter_webrtc` version jump compile and analyze
+  cleanly but still need on-device verification (audio decrypts with matching
+  room keys; DM calls; emoji picker).
+
+---
+
 ## 2026-05-08 — Federation mesh, emoji picker, server guide
 
 ### Added

@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-05-09 (sesión cerrada — todo en GitHub main, proyecto pausado)
+**Última actualización:** 2026-07-07 (endurecimiento de seguridad + CI + modernización de deps — todo en GitHub main, CI 7/7 verde)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -25,6 +25,36 @@
 | 4f | Tick de confirmación servidor, nombre en lista de chats | ✅ Completo |
 | 4g | Emoji picker en todos los chats | ✅ Completo |
 | 4h | Federación de servidores (4 modos: public/private/mesh_public/mesh_private) | ✅ Completo |
+| 5 | Endurecimiento de seguridad (auditoría §13) + CI + modernización deps | ✅ Completo |
+
+### Completado en sesión 2026-07-07 (seguridad + CI + deps)
+
+Auditoría del diseño (§13) contra el código y cierre de todos los huecos. Detalle en `CHANGELOG.md` (2026-07-07).
+
+**Servidor (Go):**
+- [x] `crypto/verify.go` (+test) y `ws/client.go` — verificación real de firma Ed25519 en DMs antes de reenviar/relayar
+- [x] `main.go` — TLS 1.3 obligatorio (`MinVersion`) + arranque abortado si `jwt.secret` es placeholder
+- [x] `ws/client.go` — rate limiting 100 msg/min por conexión; `CheckOrigin` same-host; `room_msg`/`voice_join` exigen sala existente
+- [x] `api/handlers/users.go` — binding de identidad `user_id == BLAKE2s(public_key)`
+
+**Cliente (Flutter):**
+- [x] `crypto/noise_handshake.dart` — forward secrecy (efímero del respondedor, `ee`/`se`) + `test/noise_handshake_test.dart`
+- [x] `store/messages_store.dart` — verificación de firma en recepción de DM + envío diferido tras handshake
+- [x] `voice/voice_client.dart` + `store/voice_store.dart` — voz E2E con FrameCryptor (room_key, AES-GCM); fail-closed sin clave
+- [x] `network/ws_client.dart` + `store/rooms_store.dart` — re-join de salas al reconectar (`onConnected`)
+
+**CI (GitHub Actions):**
+- [x] `.github/workflows/server.yml` — build nativo Linux/macOS/Windows (CGO/sqlite)
+- [x] `.github/workflows/app.yml` — build Android/iOS/macOS/Windows
+- [x] **Matriz 7/7 en verde**
+
+**Modernización de dependencias (para que Android compile):**
+- [x] `emoji_picker_flutter` 2.2.0→4.x, `flutter_webrtc` 0.9.48→1.5.2, `file_picker` 6.1.1→8.x
+- [x] `android/app/build.gradle.kts` — `minSdk` 23; borrados los `Podfile.lock` obsoletos; `pod repo update` en CI iOS/macOS
+
+**Pendiente de validar en dispositivo:** voz E2E (prueba positiva/negativa del `_ratchetSalt`), llamadas DM y emoji picker tras el salto de `flutter_webrtc` 0.9→1.5.
+
+**Nota de sincronización:** la copia en `/Volumes/...` es backup del NAS; se había quedado atrás respecto al `main` de GitHub y se resincronizó. Trabajar siempre desde `origin/main`.
 
 ### Completado en sesión 2026-05-07/08
 
