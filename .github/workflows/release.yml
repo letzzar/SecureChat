@@ -1,0 +1,159 @@
+name: Release
+
+# Build every platform and publish a GitHub Release when a v* tag is pushed:
+#   git tag v0.6.0 && git push origin v0.6.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    name: server-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-amd64
+            out: securechat-server-linux-amd64
+          - os: macos-latest
+            name: macos-arm64
+            out: securechat-server-macos-arm64
+          - os: windows-latest
+            name: windows-amd64
+            out: securechat-server-windows-amd64.exe
+    defaults:
+      run:
+        working-directory: securechat-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: securechat-server/go.mod
+          cache-dependency-path: securechat-server/go.sum
+      - run: go build -v -o "${{ matrix.out }}" ./main.go
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: securechat-server/${{ matrix.out }}
+          if-no-files-found: error
+
+  android:
+    name: android
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: securechat-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/flutter-apk/app-release.apk "securechat-android-${{ github.ref_name }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: securechat-app/securechat-android-${{ github.ref_name }}.apk
+          if-no-files-found: error
+
+  ios:
+    name: ios
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: securechat-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: pod repo update
+      - run: flutter build ios --release --no-codesign
+      - run: cd build/ios/iphoneos && zip -qr "$GITHUB_WORKSPACE/securechat-app/securechat-ios-unsigned-${{ github.ref_name }}.zip" *.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: securechat-app/securechat-ios-unsigned-${{ github.ref_name }}.zip
+          if-no-files-found: error
+
+  macos:
+    name: macos
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: securechat-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter config --enable-macos-desktop
+      - run: flutter pub get
+      - run: pod repo update
+      - run: flutter build macos --release
+      - run: cd build/macos/Build/Products/Release && zip -qr "$GITHUB_WORKSPACE/securechat-app/securechat-macos-${{ github.ref_name }}.zip" *.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: securechat-app/securechat-macos-${{ github.ref_name }}.zip
+          if-no-files-found: error
+
+  windows:
+    name: windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: securechat-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter config --enable-windows-desktop
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Zip Windows build
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "securechat-windows-${{ github.ref_name }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: securechat-app/securechat-windows-${{ github.ref_name }}.zip
+          if-no-files-found: error
+
+  release:
+    name: publish
+    needs: [server, android, ios, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SecureChat ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: dist/**/*
