@@ -27,11 +27,11 @@ dependencies:
   # UI
   intl: ^0.19.0
   qr_flutter: ^4.1.0
-  file_picker: ^6.1.1
+  file_picker: ^8.0.7
   path_provider: ^2.1.3
 
   # Voice
-  flutter_webrtc: ^0.9.47
+  flutter_webrtc: ^0.11.6+hotfix.1
   emoji_picker_flutter: ^2.2.0
 
 dev_dependencies:
