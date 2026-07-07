@@ -24,8 +24,7 @@ android {
         applicationId = "com.securechat.securechat"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // flutter_webrtc 0.11+ requires at least API 23.
-        minSdk = maxOf(flutter.minSdkVersion, 23)
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
