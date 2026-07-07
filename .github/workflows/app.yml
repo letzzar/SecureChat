@@ -27,9 +27,6 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          # NOTE: iOS/macOS scaffolding (FlutterSceneDelegate) needs a recent
-          # Flutter, but Android plugins (flutter_webrtc 0.9.48, file_picker 6.x)
-          # only build on <3.29. Android/Windows need those deps modernized.
           channel: stable
           cache: true
       - run: flutter pub get
@@ -47,12 +44,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          # NOTE: iOS/macOS scaffolding (FlutterSceneDelegate) needs a recent
-          # Flutter, but Android plugins (flutter_webrtc 0.9.48, file_picker 6.x)
-          # only build on <3.29. Android/Windows need those deps modernized.
           channel: stable
           cache: true
       - run: flutter pub get
+      # Refresh the CocoaPods spec repo so the WebRTC-SDK pod for
+      # flutter_webrtc 1.x resolves (runner's repo can be stale).
+      - run: pod repo update
       # No signing certs in CI: build without code signing.
       - run: flutter build ios --release --no-codesign
       - name: Package unsigned .app
@@ -72,13 +69,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          # NOTE: iOS/macOS scaffolding (FlutterSceneDelegate) needs a recent
-          # Flutter, but Android plugins (flutter_webrtc 0.9.48, file_picker 6.x)
-          # only build on <3.29. Android/Windows need those deps modernized.
           channel: stable
           cache: true
       - run: flutter config --enable-macos-desktop
       - run: flutter pub get
+      # Refresh the CocoaPods spec repo so the WebRTC-SDK pod for
+      # flutter_webrtc 1.x resolves (runner's repo can be stale).
+      - run: pod repo update
       - run: flutter build macos --release
       - name: Zip .app
         run: |
@@ -97,9 +94,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          # NOTE: iOS/macOS scaffolding (FlutterSceneDelegate) needs a recent
-          # Flutter, but Android plugins (flutter_webrtc 0.9.48, file_picker 6.x)
-          # only build on <3.29. Android/Windows need those deps modernized.
           channel: stable
           cache: true
       - run: flutter config --enable-windows-desktop
