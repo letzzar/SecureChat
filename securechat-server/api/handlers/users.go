@@ -9,13 +9,14 @@ import (
 	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
 	"github.com/securechat/server/federation"
+	"golang.org/x/crypto/blake2s"
 )
 
 type registerRequest struct {
 	UserID      string `json:"user_id"`
 	DisplayName string `json:"display_name"`
-	PublicKey   string `json:"public_key"`   // hex-encoded 32 bytes X25519
-	SignPublic  string `json:"sign_public"`  // hex-encoded 32 bytes Ed25519
+	PublicKey   string `json:"public_key"`  // hex-encoded 32 bytes X25519
+	SignPublic  string `json:"sign_public"` // hex-encoded 32 bytes Ed25519
 	InviteCode  string `json:"invite_code"`
 }
 
@@ -57,6 +58,14 @@ func Register(cfg *config.Config, database *sql.DB) http.HandlerFunc {
 		sp, err := hex.DecodeString(req.SignPublic)
 		if err != nil || len(sp) != 32 {
 			writeError(w, http.StatusBadRequest, "invalid_sign_public", "sign_public must be 32-byte hex")
+			return
+		}
+
+		// Identity binding (design §5): user_id must equal BLAKE2s(public_key).
+		// Prevents registering an identifier that does not derive from the key.
+		derived := blake2s.Sum256(pk)
+		if hex.EncodeToString(derived[:]) != req.UserID {
+			writeError(w, http.StatusBadRequest, "user_id_mismatch", "user_id must equal BLAKE2s(public_key)")
 			return
 		}
 

@@ -69,6 +69,9 @@ final wsClientProvider = Provider<WsClient?>((ref) {
   if (identity == null) return null;
 
   final client = WsClient(serverUrl: identity.serverUrl, jwt: identity.jwt);
+  // Re-subscribe to joined rooms after each (re)connect; server membership is
+  // dropped on disconnect.
+  client.onConnected = () => ref.read(roomsProvider.notifier).resendJoins(client);
   client.connect();
   ref.onDispose(client.dispose);
   return client;
@@ -307,6 +310,7 @@ Future<void> _onNoiseInit(Map<String, dynamic> msg, WidgetRef ref) async {
   ref.read(wsClientProvider)?.send({
     'type': 'noise_resp',
     'to': fromId,
+    'e_pub': resp.ePubHex,
     'nonce': resp.nonce,
     'payload': resp.payload,
     'sig': sig,
@@ -324,10 +328,23 @@ Future<void> _onNoiseResp(Map<String, dynamic> msg, WidgetRef ref) async {
   try {
     await processNoiseResp(
       peerStaticPubHex: peerStaticPubHex,
+      ePubHex: msg['e_pub'] as String? ?? '',
       nonce: msg['nonce'] as String? ?? '',
       payload: msg['payload'] as String? ?? '',
     );
-  } catch (_) {}
+  } catch (_) {
+    return;
+  }
+
+  // Handshake complete — flush any DMs queued while it was in flight.
+  final sessionKey = getSession(peerStaticPubHex);
+  final ws = ref.read(wsClientProvider);
+  final queued = _pendingSends.remove(peerStaticPubHex) ?? [];
+  if (sessionKey != null && ws != null) {
+    for (final p in queued) {
+      await _sendEncryptedDM(ws, ref, p.peerUserId, sessionKey, p.text, p.seq, p.msgId);
+    }
+  }
 }
 
 Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef ref) async {
@@ -336,8 +353,10 @@ Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef r
   // Silently drop messages from blocked users
   if (ref.read(blockedUsersProvider).contains(fromId)) return;
 
-  // Fetch peer key if unknown
-  if (!ref.read(knownPeersProvider).containsKey(fromId)) {
+  // Fetch peer keys if unknown or if the cached entry lacks sign_public
+  // (e.g. it was cached by sendDM, which only stores public_key).
+  final cached = ref.read(knownPeersProvider)[fromId];
+  if (cached == null || (cached['sign_public'] as String? ?? '').isEmpty) {
     try {
       final data = await ref.read(apiClientProvider)?.getUser(fromId);
       if (data != null) {
@@ -348,9 +367,24 @@ Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef r
     }
   }
 
-  final peerStaticPubHex = ref.read(knownPeersProvider)[fromId]?['public_key'] as String? ?? '';
+  final peerData = ref.read(knownPeersProvider)[fromId];
+  final peerStaticPubHex = peerData?['public_key'] as String? ?? '';
   final sessionKey = getSession(peerStaticPubHex);
   if (sessionKey == null) return;
+
+  // Verify the sender's Ed25519 signature before trusting the message.
+  // Must mirror exactly what the sender signs in sendDM().
+  final peerSignPubHex = peerData?['sign_public'] as String? ?? '';
+  final signed = utf8.encode(
+    'dm:${identity.userId}:${msg['nonce']}:${msg['payload']}:${msg['seq']}',
+  );
+  final sigValid = peerSignPubHex.isNotEmpty &&
+      await verifySignature(
+        data: signed,
+        sigHex: msg['sig'] as String? ?? '',
+        pubKeyHex: peerSignPubHex,
+      );
+  if (!sigValid) return; // drop unauthenticated / tampered message
 
   String text;
   try {
@@ -397,6 +431,47 @@ Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef r
 
 final _pendingSeqs = <int, ({String peerId, String msgId})>{};
 
+// ── Outgoing DMs waiting for a Noise handshake to finish ─────────────────────
+// Keyed by peer static public key hex; flushed by _onNoiseResp once the
+// forward-secret session key is available.
+final _pendingSends = <String, List<_PendingSend>>{};
+
+class _PendingSend {
+  final String peerUserId;
+  final String text;
+  final int seq;
+  final String msgId;
+  const _PendingSend(this.peerUserId, this.text, this.seq, this.msgId);
+}
+
+/// Encrypts [text] with an established [sessionKey], signs it, tracks the
+/// delivery ack, and sends the DM.
+Future<void> _sendEncryptedDM(
+  WsClient ws,
+  WidgetRef ref,
+  String peerUserId,
+  List<int> sessionKey,
+  String text,
+  int seq,
+  String msgId,
+) async {
+  final enc = await encryptMessage(utf8.encode(text), sessionKey);
+  final signPayload = utf8.encode('dm:$peerUserId:${enc.nonce}:${enc.ciphertext}:$seq');
+  final sig = await signData(signPayload);
+
+  _pendingSeqs[seq] = (peerId: peerUserId, msgId: msgId);
+
+  ws.send({
+    'type': 'dm',
+    'to': peerUserId,
+    'nonce': enc.nonce,
+    'payload': enc.ciphertext,
+    'sig': sig,
+    'seq': seq,
+    'ts': seq ~/ 1000,
+  });
+}
+
 // ── Send DM ───────────────────────────────────────────────────────────────────
 
 final _rng = Random.secure();
@@ -425,13 +500,33 @@ Future<String?> sendDM({
   final msgId = _uuid();
   final seq = DateTime.now().millisecondsSinceEpoch;
 
-  // If no session yet, start handshake first (message will be sent after noise_resp)
+  // Mark peer as accepted so their replies come through directly.
+  ref.read(acceptedContactsProvider.notifier).update((s) => {...s, peerUserId});
+
+  // Optimistic local message (shows immediately as "sending").
+  final outgoing = ChatMessage(
+    id: msgId,
+    fromUserId: myUserId,
+    toUserId: peerUserId,
+    text: text,
+    timestamp: DateTime.now(),
+    isOutgoing: true,
+    status: MessageStatus.sending,
+  );
+  ref.read(conversationProvider.notifier).addMessage(peerUserId, outgoing);
+
+  // No forward-secret session yet: run the handshake first and queue this DM.
+  // The final key needs the peer's ephemeral, so we cannot encrypt until the
+  // noise_resp arrives (_onNoiseResp flushes the queue).
   if (!hasSession(peerStaticPubHex)) {
-    // Cache peer pub only if not already known (avoid overwriting display_name)
     ref.read(knownPeersProvider.notifier).update((s) {
       if (s.containsKey(peerUserId)) return s;
       return {...s, peerUserId: {'user_id': peerUserId, 'public_key': peerStaticPubHex}};
     });
+
+    _pendingSends
+        .putIfAbsent(peerStaticPubHex, () => [])
+        .add(_PendingSend(peerUserId, text, seq, msgId));
 
     final initData = await buildNoiseInit(
       myUserId: myUserId,
@@ -450,46 +545,10 @@ Future<String?> sendDM({
       'seq': 0,
       'ts': seq ~/ 1000,
     });
-    // Session key is now in memory (from buildNoiseInit), but we wait for noise_resp to confirm.
-    // Optimistically continue — if the peer is offline, the message will fail gracefully.
+    return msgId;
   }
 
-  final sessionKey = getSession(peerStaticPubHex);
-  if (sessionKey == null) {
-    // Still no session after init — peer is offline or unreachable
-    return null;
-  }
-
-  final enc = await encryptMessage(utf8.encode(text), sessionKey);
-  final signPayload = utf8.encode('dm:$peerUserId:${enc.nonce}:${enc.ciphertext}:$seq');
-  final sig = await signData(signPayload);
-
-  // Mark peer as accepted so their replies come through directly
-  ref.read(acceptedContactsProvider.notifier).update((s) => {...s, peerUserId});
-
-  // Optimistic local message
-  final outgoing = ChatMessage(
-    id: msgId,
-    fromUserId: myUserId,
-    toUserId: peerUserId,
-    text: text,
-    timestamp: DateTime.now(),
-    isOutgoing: true,
-    status: MessageStatus.sending,
-  );
-  ref.read(conversationProvider.notifier).addMessage(peerUserId, outgoing);
-
-  _pendingSeqs[seq] = (peerId: peerUserId, msgId: msgId);
-
-  ws.send({
-    'type': 'dm',
-    'to': peerUserId,
-    'nonce': enc.nonce,
-    'payload': enc.ciphertext,
-    'sig': sig,
-    'seq': seq,
-    'ts': seq ~/ 1000,
-  });
-
+  // Session already established — send immediately.
+  await _sendEncryptedDM(ws, ref, peerUserId, getSession(peerStaticPubHex)!, text, seq, msgId);
   return msgId;
 }

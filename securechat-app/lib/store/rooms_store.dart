@@ -79,6 +79,14 @@ class RoomsNotifier extends Notifier<RoomsState> {
     ws.send({'type': 'room_join', 'room_id': roomId});
   }
 
+  /// Re-subscribe to every joined room after a WS (re)connect. Room keys stay
+  /// in memory, so no password re-entry is needed.
+  void resendJoins(WsClient ws) {
+    for (final room in state.joined) {
+      ws.send({'type': 'room_join', 'room_id': room.roomId});
+    }
+  }
+
   void leaveRoom(String roomId, WsClient ws) {
     ws.send({'type': 'room_leave', 'room_id': roomId});
     _removeRoomKey(roomId);

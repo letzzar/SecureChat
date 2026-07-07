@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:securechat/store/app_state.dart';
 import 'package:securechat/store/messages_store.dart';
+import 'package:securechat/store/rooms_store.dart';
 import 'package:securechat/voice/voice_client.dart';
 
 class VoiceState {
@@ -41,8 +42,13 @@ class VoiceNotifier extends Notifier<VoiceState> {
     final identity = ref.read(sessionProvider).identity;
     if (ws == null || identity == null) return;
 
+    // Voice is E2E-encrypted with the room key; without it we must not join
+    // (would otherwise send audio the SFU could hear).
+    final roomKey = getRoomKey(roomId);
+    if (roomKey == null) return;
+
     _client ??= VoiceClient(ws: ws, myUserId: identity.userId);
-    await _client!.join(roomId);
+    await _client!.join(roomId, roomKey);
     state = VoiceState(activeRoomId: roomId);
   }
 

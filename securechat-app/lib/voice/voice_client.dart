@@ -1,26 +1,57 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
 import 'package:securechat/network/ws_client.dart';
 
 /// Manages the WebRTC peer connection for a single voice room session.
+///
+/// Audio is end-to-end encrypted at the frame level (WebRTC insertable
+/// streams / FrameCryptor) with the shared room key, so the SFU forwards
+/// opaque frames and cannot hear the audio (design §9).
 class VoiceClient {
   final WsClient _ws;
+  final String _myUserId;
 
   webrtc.RTCPeerConnection? _pc;
   webrtc.MediaStream? _localStream;
   String? _activeRoomId;
 
+  // E2E media encryption state.
+  webrtc.KeyProvider? _keyProvider;
+  final List<webrtc.FrameCryptor> _cryptors = [];
+  int _cryptorSeq = 0;
+
   bool _muted = false;
   bool get muted => _muted;
   bool get inCall => _activeRoomId != null;
 
-  VoiceClient({required WsClient ws, required String myUserId}) : _ws = ws;
+  VoiceClient({required WsClient ws, required String myUserId})
+      : _ws = ws,
+        _myUserId = myUserId;
 
-  /// Join the voice channel of [roomId].
-  Future<void> join(String roomId) async {
+  // Fixed salt shared by all clients so everyone derives the same media key
+  // from the shared room key. Must be identical across peers.
+  static final Uint8List _ratchetSalt =
+      Uint8List.fromList(utf8.encode('securechat-e2ee-voice-v1'));
+
+  /// Join the voice channel of [roomId]. [roomKey] is the 32-byte room key;
+  /// all voice media is end-to-end encrypted with it.
+  Future<void> join(String roomId, Uint8List roomKey) async {
     if (_activeRoomId != null) await leave();
+
+    // Shared-key provider for frame encryption (same key + salt on every peer,
+    // so all members derive the same media key; the SFU has neither).
+    _keyProvider = await webrtc.frameCryptorFactory.createDefaultKeyProvider(
+      webrtc.KeyProviderOptions(
+        sharedKey: true,
+        ratchetSalt: _ratchetSalt,
+        ratchetWindowSize: 16,
+        failureTolerance: -1,
+      ),
+    );
+    await _keyProvider!.setSharedKey(key: roomKey, index: 0);
 
     // Request microphone access
     _localStream = await webrtc.navigator.mediaDevices.getUserMedia({
@@ -37,9 +68,10 @@ class VoiceClient {
     _pc = await webrtc.createPeerConnection(config);
     _activeRoomId = roomId;
 
-    // Add local audio tracks to the peer connection
+    // Add local audio tracks and encrypt outgoing frames.
     for (final track in _localStream!.getAudioTracks()) {
-      await _pc!.addTrack(track, _localStream!);
+      final sender = await _pc!.addTrack(track, _localStream!);
+      await _attachCryptorToSender(sender);
     }
 
     // Send ICE candidates to server as they are gathered (trickle ICE)
@@ -53,9 +85,12 @@ class VoiceClient {
       }
     };
 
-    // Remote audio is handled automatically by WebRTC engine
+    // Decrypt incoming frames from each remote participant.
     _pc!.onTrack = (event) {
-      // Audio playback is automatic on mobile
+      final receiver = event.receiver;
+      if (receiver != null) {
+        _attachCryptorToReceiver(receiver);
+      }
     };
 
     // Notify server we're joining
@@ -100,6 +135,32 @@ class VoiceClient {
     ));
   }
 
+  /// Encrypt outgoing audio frames on [sender] with the shared room key.
+  Future<void> _attachCryptorToSender(webrtc.RTCRtpSender sender) async {
+    final fc = await webrtc.frameCryptorFactory.createFrameCryptorForRtpSender(
+      participantId: '${_myUserId}_snd_${_cryptorSeq++}',
+      sender: sender,
+      algorithm: webrtc.Algorithm.kAesGcm,
+      keyProvider: _keyProvider!,
+    );
+    await fc.setKeyIndex(0);
+    await fc.setEnabled(true);
+    _cryptors.add(fc);
+  }
+
+  /// Decrypt incoming audio frames on [receiver] with the shared room key.
+  Future<void> _attachCryptorToReceiver(webrtc.RTCRtpReceiver receiver) async {
+    final fc = await webrtc.frameCryptorFactory.createFrameCryptorForRtpReceiver(
+      participantId: 'rcv_${_cryptorSeq++}',
+      receiver: receiver,
+      algorithm: webrtc.Algorithm.kAesGcm,
+      keyProvider: _keyProvider!,
+    );
+    await fc.setKeyIndex(0);
+    await fc.setEnabled(true);
+    _cryptors.add(fc);
+  }
+
   /// Toggle microphone mute state. Returns the new muted state.
   bool toggleMute() {
     _muted = !_muted;
@@ -115,6 +176,13 @@ class VoiceClient {
     if (roomId != null) {
       _ws.send({'type': 'voice_leave', 'room_id': roomId});
     }
+
+    for (final fc in _cryptors) {
+      await fc.dispose();
+    }
+    _cryptors.clear();
+    await _keyProvider?.dispose();
+    _keyProvider = null;
 
     await _localStream?.dispose();
     _localStream = null;

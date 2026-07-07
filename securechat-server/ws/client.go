@@ -5,40 +5,60 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
 	jwtauth "github.com/securechat/server/auth"
 	"github.com/securechat/server/config"
+	"github.com/securechat/server/crypto"
 	"github.com/securechat/server/db"
 	"github.com/securechat/server/federation"
 	"github.com/securechat/server/sfu"
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = 50 * time.Second
-	maxMessageSize = 65536
-	sendBufSize    = 64
+	writeWait            = 10 * time.Second
+	pongWait             = 60 * time.Second
+	pingPeriod           = 50 * time.Second
+	maxMessageSize       = 65536
+	sendBufSize          = 64
+	maxMessagesPerMinute = 100 // design §13: rate limit per connection
 )
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	// Accept native clients (no Origin header) and same-origin web clients only.
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
+	},
 }
 
 // Client represents a single WebSocket connection.
 type Client struct {
-	userID   string
-	conn     *websocket.Conn
-	send     chan *OutgoingMessage
-	hub      *Hub
-	database *sql.DB
-	cfg      *config.Config
-	sfu      *sfu.SFU
-	fed      *federation.Client // nil when not in mesh mode
+	userID     string
+	signPublic []byte // sender's Ed25519 public key, cached at connect time
+	conn       *websocket.Conn
+	send       chan *OutgoingMessage
+	hub        *Hub
+	database   *sql.DB
+	cfg        *config.Config
+	sfu        *sfu.SFU
+	fed        *federation.Client // nil when not in mesh mode
+
+	// Per-connection rate limiting (accessed only from readPump goroutine).
+	msgWindowStart time.Time
+	msgCount       int
 }
 
 // ServeWS upgrades the HTTP connection and starts the client pump goroutines.
@@ -56,6 +76,14 @@ func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, f
 		return
 	}
 
+	// Load the sender's registered Ed25519 public key so DM signatures can be
+	// verified without a DB hit per message. Fails closed if the user is gone.
+	sender, err := db.GetUser(database, userID)
+	if err != nil || sender == nil {
+		http.Error(w, "unknown user", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade: %v", err)
@@ -63,14 +91,15 @@ func ServeWS(hub *Hub, database *sql.DB, cfg *config.Config, sfuInst *sfu.SFU, f
 	}
 
 	c := &Client{
-		userID:   userID,
-		conn:     conn,
-		send:     make(chan *OutgoingMessage, sendBufSize),
-		hub:      hub,
-		database: database,
-		cfg:      cfg,
-		sfu:      sfuInst,
-		fed:      fedClient,
+		userID:     userID,
+		signPublic: sender.SignPublic,
+		conn:       conn,
+		send:       make(chan *OutgoingMessage, sendBufSize),
+		hub:        hub,
+		database:   database,
+		cfg:        cfg,
+		sfu:        sfuInst,
+		fed:        fedClient,
 	}
 
 	hub.Register(c)
@@ -141,6 +170,11 @@ func (c *Client) writePump() {
 }
 
 func (c *Client) handleMessage(raw []byte) {
+	if !c.allowMessage() {
+		c.sendError("rate_limited", "Too many messages; slow down")
+		return
+	}
+
 	var msg IncomingMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		c.sendError("invalid_json", "Invalid JSON")
@@ -196,6 +230,19 @@ func (c *Client) handleDM(msg *IncomingMessage) {
 	}
 	if msg.Sig == "" {
 		c.sendError("missing_sig", "DM requires Ed25519 signature")
+		return
+	}
+
+	// Verify the sender actually signed this message with their registered
+	// Ed25519 key. The signed content must match exactly what the client signs
+	// (see app messages_store.dart): "<type>:<to>:<nonce>:<payload>" for the
+	// handshake, with ":<seq>" appended for a plain dm.
+	signed := msg.Type + ":" + msg.To + ":" + msg.Nonce + ":" + msg.Payload
+	if msg.Type == "dm" {
+		signed += ":" + strconv.FormatInt(msg.Seq, 10)
+	}
+	if !crypto.VerifySignature(c.signPublic, []byte(signed), msg.Sig) {
+		c.sendError("invalid_sig", "Ed25519 signature verification failed")
 		return
 	}
 
@@ -319,6 +366,13 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 		return
 	}
 
+	// Only relay to rooms that actually exist; content stays opaque.
+	exists, err := db.RoomExists(c.database, msg.RoomID)
+	if err != nil || !exists {
+		c.sendError("room_not_found", "Room does not exist")
+		return
+	}
+
 	out := &OutgoingMessage{
 		Type:    "room_msg",
 		From:    c.userID,
@@ -333,6 +387,16 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 func (c *Client) handleVoiceJoin(msg *IncomingMessage) {
 	if msg.RoomID == "" {
 		c.sendError("invalid_voice_join", "room_id required")
+		return
+	}
+
+	// Require the room to exist before creating an SFU peer, so the SFU never
+	// spins up rooms for arbitrary ids. NOTE: the server cannot verify knowledge
+	// of the room password (it never sees room_key); password-gating remains a
+	// client-side + room_id-secrecy guarantee (design §8).
+	exists, err := db.RoomExists(c.database, msg.RoomID)
+	if err != nil || !exists {
+		c.sendError("room_not_found", "Room does not exist")
 		return
 	}
 
@@ -488,6 +552,18 @@ func (c *Client) handleDmCallSignal(msg *IncomingMessage) {
 		SDP:       msg.SDP,
 		Candidate: msg.Candidate,
 	})
+}
+
+// allowMessage enforces a fixed-window rate limit of maxMessagesPerMinute
+// inbound messages per connection. Called only from the readPump goroutine.
+func (c *Client) allowMessage() bool {
+	now := time.Now()
+	if now.Sub(c.msgWindowStart) >= time.Minute {
+		c.msgWindowStart = now
+		c.msgCount = 0
+	}
+	c.msgCount++
+	return c.msgCount <= maxMessagesPerMinute
 }
 
 func (c *Client) sendError(code, msg string) {

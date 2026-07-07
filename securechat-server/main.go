@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -22,6 +23,12 @@ func main() {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+
+	// Refuse to run with an unset or placeholder JWT secret — it would let
+	// anyone forge session tokens.
+	if cfg.JWT.Secret == "" || cfg.JWT.Secret == "change_me_in_production" {
+		log.Fatal("jwt.secret is unset or still the default placeholder — set a strong secret in config.toml")
 	}
 
 	database, err := db.Open(cfg.Database.Path)
@@ -88,8 +95,15 @@ func main() {
 		if cfg.Server.Cert == "" || cfg.Server.Key == "" {
 			log.Fatal("TLS enabled but cert/key not configured")
 		}
-		log.Fatal(http.ListenAndServeTLS(addr, cfg.Server.Cert, cfg.Server.Key, router))
+		// Design §13: TLS 1.3 mandatory (no TLS 1.2 downgrade).
+		srv := &http.Server{
+			Addr:      addr,
+			Handler:   router,
+			TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},
+		}
+		log.Fatal(srv.ListenAndServeTLS(cfg.Server.Cert, cfg.Server.Key))
 	} else {
+		log.Printf("WARNING: TLS disabled — all traffic (including JWT) is sent in cleartext. Use only for local development.")
 		log.Fatal(http.ListenAndServe(addr, router))
 	}
 }

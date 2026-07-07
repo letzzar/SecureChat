@@ -18,6 +18,10 @@ class WsClient {
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get messages => _messageController.stream;
 
+  /// Called after every successful (re)connect, so callers can re-subscribe
+  /// to their rooms — server-side room membership is dropped on disconnect.
+  void Function()? onConnected;
+
   WsState get state => _state;
 
   int _backoffSeconds = 1;
@@ -54,6 +58,7 @@ class WsClient {
       _state = WsState.connected;
       _backoffSeconds = 1;
       _sendRaw({'type': 'ping'});
+      onConnected?.call();
     } catch (_) {
       _channel = null;
       _state = WsState.disconnected;

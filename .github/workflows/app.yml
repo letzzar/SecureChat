@@ -1,0 +1,102 @@
+name: Build App
+
+on:
+  push:
+    paths:
+      - 'securechat-app/**'
+      - '.github/workflows/app.yml'
+  pull_request:
+    paths:
+      - 'securechat-app/**'
+      - '.github/workflows/app.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: securechat-app
+
+jobs:
+  android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: securechat-android-apk
+          path: securechat-app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS (unsigned)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # No signing certs in CI: build without code signing.
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned .app
+        run: |
+          cd build/ios/iphoneos
+          zip -r securechat-ios-unsigned.zip *.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: securechat-ios-unsigned
+          path: securechat-app/build/ios/iphoneos/securechat-ios-unsigned.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter config --enable-macos-desktop
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Zip .app
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r securechat-macos.zip *.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: securechat-macos
+          path: securechat-app/build/macos/Build/Products/Release/securechat-macos.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter config --enable-windows-desktop
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: securechat-windows
+          # Recent Flutter emits desktop builds under x64/; adjust if your
+          # Flutter version uses build/windows/runner/Release.
+          path: securechat-app/build/windows/x64/runner/Release/
+          if-no-files-found: error
