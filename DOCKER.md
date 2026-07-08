@@ -45,6 +45,41 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+### Ejemplo de YAML (compose)
+
+`docker-compose.yml` — usando la imagen ya publicada. Si prefieres compilar
+desde el código, cambia el bloque `image:` por `build: ./securechat-server`.
+
+```yaml
+services:
+  securechat-server:
+    image: ghcr.io/letzzar/securechat-server:latest   # o letzzar/securechat-server:latest (Docker Hub)
+    container_name: securechat-server
+    restart: unless-stopped
+    pull_policy: always
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+    ports:
+      - "${SECURECHAT_PORT:-8443}:8443"
+    volumes:
+      - ${DATA_DIR:-./data}:/data   # data.db + config.toml opcional
+```
+
+Y el `.env` que lee (mínimo imprescindible):
+
+```dotenv
+# genera uno con:  openssl rand -hex 32
+SECURECHAT_JWT_SECRET=pega_aqui_tu_secreto_de_64_hex
+SECURECHAT_MODE=private
+SECURECHAT_PORT=8443
+DATA_DIR=./data
+TZ=Europe/Madrid
+```
+
+Arranque: `docker compose -f docker-compose.pull.yml up -d` (o `docker compose up -d --build`).
+
 ---
 
 ## Configuración por variables de entorno

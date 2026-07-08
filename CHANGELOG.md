@@ -9,6 +9,30 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ---
 
+## 2026-07-08 — Docker image (multi-arch) + auto-publish
+
+### Added
+- **Server Docker image.** `securechat-server/Dockerfile` — multi-stage Go build
+  (CGO + SQLite) on Alpine. `.dockerignore` keeps secrets, the DB and prebuilt
+  binaries out of the image.
+- **Config via environment variables** (`config/config.go`): `SECURECHAT_*`
+  overrides (`JWT_SECRET`, `DB_PATH`, `HOST`, `PORT`, `MODE`, `TLS`,
+  `TLS_CERT`, `TLS_KEY`) so the server runs from `docker run` with no config
+  file — just `SECURECHAT_JWT_SECRET`. A mounted `/data/config.toml` is still
+  used as a base if present.
+- **Compose files** — `docker-compose.yml` (builds from source) and
+  `docker-compose.pull.yml` (uses the published image), plus `.env.example`.
+- **Auto-publish workflow** — `.github/workflows/docker-publish.yml` builds and
+  pushes a **multi-arch image (linux/amd64 + linux/arm64)** on every push to
+  `main` touching `securechat-server/**` and on `v*` tags:
+  - **GHCR** always → `ghcr.io/letzzar/securechat-server`.
+  - **Docker Hub** → `letzzar/securechat-server` when `DOCKERHUB_USERNAME` /
+    `DOCKERHUB_TOKEN` secrets are set.
+- **DOCKER.md** — bilingual guide: quick start, compose (build / pull), env
+  config reference, TLS behind a reverse proxy, publishing, persistence/backup.
+
+---
+
 ## 2026-07-07 — Security hardening, forward secrecy, E2E voice, CI, dependency modernization
 
 Security audit of the design (`SECURECHAT_DESIGN.md` §13) against the code, then
