@@ -9,6 +9,38 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ---
 
+## 2026-07-08 — Encrypted local history + multi-server
+
+### Added
+- **Encrypted local persistence.** DM and room message history, room keys, known
+  peers, accepted/blocked contacts and contact requests now survive app restarts.
+  - `store/local_store.dart`: serialized to JSON, encrypted at rest with
+    ChaCha20-Poly1305 using a per-device key kept in the OS secure store, written
+    to the app support directory.
+  - `store/persistence.dart`: hydrates on startup before the UI, saves debounced
+    on every change. Namespaced per account (`user_id`).
+  - Noise DM session keys are intentionally **not** persisted (forward secrecy);
+    only the decrypted history is.
+  - `toJson`/`fromJson` on `ChatMessage`, `RoomMessage`, `JoinedRoom`
+    (+ round-trip tests).
+- **Multi-server support — one identity per server, switch the active one.**
+  - `crypto/identity.dart`: each server is a full separate account (own
+    keypair / `user_id` / JWT), stored namespaced in secure storage. The active
+    slot (read by Noise / signatures) is rewritten on switch. Existing
+    single-identity installs are migrated into an accounts index automatically.
+  - New `listAccounts` / `switchAccount` / `removeAccount`; `generateAndSaveIdentity`
+    now adds and activates a new account.
+  - Profile → **Servers**: list of saved servers (active one marked), tap to
+    switch, **Add server** (reuses onboarding with a back button).
+  - Switching swaps the encrypted local history and clears Noise sessions / room
+    keys for the new account; the WebSocket and API providers reconnect
+    automatically.
+  - **Log out** now removes only the active server (switches to another if
+    present, otherwise returns to the setup screen) — no more full logout just to
+    change servers.
+
+---
+
 ## 2026-07-08 — Docker image (multi-arch) + auto-publish
 
 ### Added
