@@ -20,6 +20,7 @@ void _removeRoomKey(String roomId) => _roomKeys.remove(roomId);
 // Persistence helpers (encrypted local store).
 Map<String, Uint8List> exportRoomKeys() => Map.of(_roomKeys);
 void restoreRoomKeys(Map<String, Uint8List> keys) => _roomKeys.addAll(keys);
+void clearRoomKeys() => _roomKeys.clear(); // on account switch
 
 // ── State ─────────────────────────────────────────────────────────────────────
 

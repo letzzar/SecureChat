@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/screens/chat/chat_screen.dart';
 import 'package:securechat/screens/rooms/create_room_screen.dart';
@@ -24,6 +25,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Removing the last account returns to the setup screen.
+    ref.listen(sessionProvider, (_, next) {
+      if (next.identity == null && !next.isLoading) context.go('/setup');
+    });
+
     final identity = ref.watch(sessionProvider).identity;
 
     return Scaffold(
@@ -571,11 +577,52 @@ class _ProfileTab extends ConsumerWidget {
             style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
           ),
         ),
-        const SizedBox(height: 16),
-        const Text('Server', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 24),
+        const Text('Servers', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text(
+          'Tap a server to switch. Each server is a separate identity.',
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
         const SizedBox(height: 8),
-        Text(identity.serverUrl, style: const TextStyle(color: Colors.grey)),
-        const SizedBox(height: 32),
+        ref.watch(accountsProvider).when(
+              data: (accounts) => Column(
+                children: [
+                  ...accounts.map((a) {
+                    final active = a.userId == identity.userId;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        color: active ? Theme.of(context).colorScheme.primary : null,
+                      ),
+                      title: Text(a.displayName.isNotEmpty ? a.displayName : _shortUserId(a.userId)),
+                      subtitle: Text(
+                        Uri.tryParse(a.serverUrl)?.host ?? a.serverUrl,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      onTap: active
+                          ? null
+                          : () => ref.read(sessionProvider.notifier).switchServer(a.userId),
+                    );
+                  }),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add server'),
+                      onPressed: () => context.push('/setup'),
+                    ),
+                  ),
+                ],
+              ),
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: LinearProgressIndicator(),
+              ),
+              error: (_, __) => const SizedBox(),
+            ),
+        const SizedBox(height: 24),
         FilledButton.icon(
           icon: const Icon(Icons.person_add_outlined),
           label: const Text('Generate invite code'),
@@ -694,8 +741,10 @@ class _ProfileTab extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Log out?'),
-        content: const Text('This will delete your local identity. Make sure you have exported it first.'),
+        title: const Text('Remove this server?'),
+        content: const Text(
+            'This deletes this server\'s identity and its local history on this device. '
+            'Your other servers stay. Make sure you have exported the identity if you need it.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
@@ -703,7 +752,7 @@ class _ProfileTab extends ConsumerWidget {
               Navigator.pop(ctx);
               ref.read(sessionProvider.notifier).logout();
             },
-            child: const Text('Log out'),
+            child: const Text('Remove'),
           ),
         ],
       ),

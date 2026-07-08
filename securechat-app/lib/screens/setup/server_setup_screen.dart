@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/network/api_client.dart';
 import 'package:securechat/store/app_state.dart';
+import 'package:securechat/store/persistence.dart';
 
 class ServerSetupScreen extends ConsumerStatefulWidget {
   const ServerSetupScreen({super.key});
@@ -75,6 +76,8 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
         ed25519Public: identity.ed25519Public,
       );
       await ref.read(sessionProvider.notifier).setIdentity(finalIdentity);
+      // Start/switch persistence for this (new, empty) account.
+      await ref.read(persistenceProvider).reloadForActiveAccount();
 
       if (mounted) context.go('/home');
     } on ApiException catch (e) {
@@ -91,6 +94,10 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
+      // Back button only when opened as "add server" (pushed on top of home).
+      appBar: Navigator.of(context).canPop()
+          ? AppBar(backgroundColor: Colors.transparent, elevation: 0, title: const Text('Add server'))
+          : null,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

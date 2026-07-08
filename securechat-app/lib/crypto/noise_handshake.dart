@@ -44,6 +44,12 @@ bool hasSession(String peerUserId) => _sessions.containsKey(peerUserId);
 List<int>? getSession(String peerUserId) => _sessions[peerUserId];
 void _storeSession(String peerUserId, List<int> key) => _sessions[peerUserId] = key;
 
+/// Drop all in-memory sessions and pending handshakes (on account switch).
+void clearNoiseSessions() {
+  _sessions.clear();
+  _pending.clear();
+}
+
 /// Called by A to build the noise_init message.
 Future<NoiseInitData> buildNoiseInit({
   required String myUserId,

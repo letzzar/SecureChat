@@ -3,6 +3,7 @@ import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/network/api_client.dart';
 import 'package:securechat/store/local_store.dart';
+import 'package:securechat/store/persistence.dart';
 
 // ── Session state ─────────────────────────────────────────────────────────────
 
@@ -41,15 +42,33 @@ class SessionNotifier extends Notifier<SessionState> {
     state = SessionState(identity: identity, isLoading: false);
   }
 
+  /// Switch the active server profile. The WebSocket/API providers rebuild
+  /// automatically; the local history is swapped for that account's.
+  Future<void> switchServer(String userId) async {
+    final id = await switchAccount(userId);
+    if (id == null) return;
+    state = SessionState(identity: id, isLoading: false);
+    await ref.read(persistenceProvider).reloadForActiveAccount();
+  }
+
+  /// Remove the active account. If other servers remain, switch to one of them;
+  /// otherwise return to the setup screen.
   Future<void> logout() async {
     final uid = state.identity?.userId;
     if (uid != null) await deleteEncrypted('acct_$uid.json');
-    await clearIdentity();
-    state = const SessionState(isLoading: false);
+    final next = uid == null ? null : await removeAccount(uid);
+    state = SessionState(identity: next, isLoading: false);
+    if (next != null) await ref.read(persistenceProvider).reloadForActiveAccount();
   }
 }
 
 final sessionProvider = NotifierProvider<SessionNotifier, SessionState>(SessionNotifier.new);
+
+// List of saved server profiles (refreshes when the active identity changes).
+final accountsProvider = FutureProvider<List<AccountSummary>>((ref) {
+  ref.watch(sessionProvider);
+  return listAccounts();
+});
 
 // ── Known peers (userId → server user JSON) ───────────────────────────────────
 

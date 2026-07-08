@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:securechat/crypto/identity.dart';
+import 'package:securechat/crypto/noise_handshake.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/models/room.dart';
 import 'package:securechat/store/app_state.dart';
@@ -80,6 +81,22 @@ class PersistenceController {
           );
     }
     _ready = true;
+  }
+
+  /// Reset all in-memory state and hydrate the (now) active account. Call after
+  /// switching servers so the UI shows the new account's history.
+  Future<void> reloadForActiveAccount() async {
+    _ready = false;
+    _debounce?.cancel();
+    _ref.read(conversationProvider.notifier).hydrate({});
+    _ref.read(roomsProvider.notifier).hydrate([], {});
+    clearRoomKeys();
+    clearNoiseSessions();
+    _ref.read(knownPeersProvider.notifier).state = {};
+    _ref.read(acceptedContactsProvider.notifier).state = {};
+    _ref.read(blockedUsersProvider.notifier).state = {};
+    _ref.read(contactRequestsProvider.notifier).hydrate([]);
+    await hydrate();
   }
 
   /// Schedules a debounced save. Wired to every relevant provider.
