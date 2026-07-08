@@ -80,6 +80,9 @@ The server listens on port `8080` by default. Set `tls = true` and provide cert/
 openssl rand -hex 32
 ```
 
+> 🐳 **Docker:** run the server as a container — see **[DOCKER.md](DOCKER.md)**.
+> Full server administration guide: **[SERVER.md](SERVER.md)**.
+
 ### Client
 
 ```bash
@@ -175,6 +178,9 @@ Escucha en el puerto `8080` por defecto. Activa `tls = true` y proporciona rutas
 ```bash
 openssl rand -hex 32
 ```
+
+> 🐳 **Docker:** levanta el servidor como contenedor — ver **[DOCKER.md](DOCKER.md)**.
+> Guía completa de administración del servidor: **[SERVER.md](SERVER.md)**.
 
 ### Cliente
 

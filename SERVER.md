@@ -22,6 +22,9 @@
 
 ## 1. Quick Start
 
+> 🐳 **Prefer Docker?** The easiest way to run the server is the container image
+> — see **[DOCKER.md](DOCKER.md)** (multi-arch, config via environment variables).
+
 ### Download or build
 
 **Pre-built binary (Windows):**
@@ -588,6 +591,10 @@ This is a normal client disconnect (app closed, network drop). It is not an erro
 ---
 
 ## 1. Inicio Rápido
+
+> 🐳 **¿Prefieres Docker?** La forma más sencilla de levantar el servidor es la
+> imagen de contenedor — ver **[DOCKER.md](DOCKER.md)** (multi-arch, configuración
+> por variables de entorno).
 
 ### Descargar o compilar
 
