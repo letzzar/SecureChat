@@ -1,0 +1,86 @@
+name: Publicar imagen Docker (servidor)
+
+# Construye la imagen del servidor SecureChat y la publica:
+#   - GHCR        -> ghcr.io/<owner>/securechat-server        (siempre)
+#   - Docker Hub  -> <DOCKERHUB_USERNAME>/securechat-server   (si hay secrets)
+#
+# Para Docker Hub, añade en el repo (Settings -> Secrets and variables ->
+# Actions) estos dos secrets:
+#   DOCKERHUB_USERNAME = tu usuario de Docker Hub (letzzar)
+#   DOCKERHUB_TOKEN    = un Access Token (Docker Hub -> Account -> Security)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+    paths:
+      - 'securechat-server/**'
+      - '.github/workflows/docker-publish.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # GHCR siempre; Docker Hub solo si existe el secret DOCKERHUB_USERNAME.
+      - name: Preparar destinos
+        id: cfg
+        env:
+          DH: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          imgs="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/securechat-server"
+          if [ -n "$DH" ]; then imgs="$imgs"$'\n'"$DH/securechat-server"; fi
+          {
+            echo "images<<EOF"
+            echo "$imgs"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          if [ -n "$DH" ]; then echo "dockerhub=true" >> "$GITHUB_OUTPUT"; else echo "dockerhub=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login en Docker Hub
+        if: steps.cfg.outputs.dockerhub == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Metadatos (tags y labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.cfg.outputs.images }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,format=short
+
+      - name: Construir y publicar
+        uses: docker/build-push-action@v6
+        with:
+          context: securechat-server
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

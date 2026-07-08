@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
@@ -85,12 +86,45 @@ func Load(path string) (*Config, error) {
 	cfg.JWT.Secret = "change_me_in_production"
 	cfg.Federation.Name = "SecureChat Node"
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return cfg, nil
+	if _, err := os.Stat(path); err == nil {
+		if _, err := toml.DecodeFile(path, cfg); err != nil {
+			return nil, err
+		}
 	}
 
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return nil, err
-	}
+	// Environment overrides (handy for Docker: run with no config file).
+	applyEnvOverrides(cfg)
 	return cfg, nil
+}
+
+// applyEnvOverrides lets SECURECHAT_* environment variables override the
+// deployment-relevant config fields, so the server can run from `docker run`
+// with just an env var and no config.toml.
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("SECURECHAT_JWT_SECRET"); v != "" {
+		cfg.JWT.Secret = v
+	}
+	if v := os.Getenv("SECURECHAT_DB_PATH"); v != "" {
+		cfg.Database.Path = v
+	}
+	if v := os.Getenv("SECURECHAT_HOST"); v != "" {
+		cfg.Server.Host = v
+	}
+	if v := os.Getenv("SECURECHAT_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = p
+		}
+	}
+	if v := os.Getenv("SECURECHAT_MODE"); v != "" {
+		cfg.Server.Mode = v
+	}
+	if v := os.Getenv("SECURECHAT_TLS"); v != "" {
+		cfg.Server.TLS = v == "1" || v == "true"
+	}
+	if v := os.Getenv("SECURECHAT_TLS_CERT"); v != "" {
+		cfg.Server.Cert = v
+	}
+	if v := os.Getenv("SECURECHAT_TLS_KEY"); v != "" {
+		cfg.Server.Key = v
+	}
 }

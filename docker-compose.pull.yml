@@ -1,0 +1,25 @@
+# Variante que USA la imagen ya publicada (NO compila nada).
+# Úsala una vez que GitHub Actions haya publicado la imagen.
+#   Arranque:  docker compose -f docker-compose.pull.yml up -d
+#
+# Variant that USES the published image (does NOT build). Use it once GitHub
+# Actions has published the image.  Start: docker compose -f docker-compose.pull.yml up -d
+
+services:
+  securechat-server:
+    # Docker Hub (público). Alternativa GHCR: ghcr.io/letzzar/securechat-server:latest
+    image: letzzar/securechat-server:latest
+    container_name: securechat-server
+    restart: unless-stopped
+    pull_policy: always
+
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+
+    ports:
+      - "${SECURECHAT_PORT:-8443}:8443"
+
+    volumes:
+      - ${DATA_DIR:-./data}:/data

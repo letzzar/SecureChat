@@ -1,0 +1,27 @@
+# Compila y levanta el servidor SecureChat.
+# Antes de arrancar:  cp .env.example .env  y pon un SECURECHAT_JWT_SECRET real
+#   (openssl rand -hex 32).  Luego:  docker compose up -d --build
+#
+# Builds and runs the SecureChat server. Copy .env.example to .env, set a real
+# SECURECHAT_JWT_SECRET, then: docker compose up -d --build
+
+services:
+  securechat-server:
+    build: ./securechat-server
+    image: securechat-server:latest
+    container_name: securechat-server
+    restart: unless-stopped
+
+    # Todas las variables SECURECHAT_* se leen de .env (ver .env.example).
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+
+    ports:
+      - "${SECURECHAT_PORT:-8443}:8443"
+
+    volumes:
+      # IZQUIERDA = carpeta del host (data.db + config.toml opcional)
+      # DERECHA   = /data dentro del contenedor
+      - ${DATA_DIR:-./data}:/data

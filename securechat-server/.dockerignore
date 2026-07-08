@@ -1,0 +1,12 @@
+# Never bake secrets, the DB, or prebuilt binaries into the image.
+config.toml
+data.db
+data.db-shm
+data.db-wal
+securechat-server
+securechat-server-linux-amd64
+securechat-server-macos-arm64
+securechat-server-windows-amd64.exe
+*.exe
+Dockerfile
+.dockerignore
