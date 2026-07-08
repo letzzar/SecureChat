@@ -17,6 +17,10 @@ Uint8List? getRoomKey(String roomId) => _roomKeys[roomId];
 void _storeRoomKey(String roomId, Uint8List key) => _roomKeys[roomId] = key;
 void _removeRoomKey(String roomId) => _roomKeys.remove(roomId);
 
+// Persistence helpers (encrypted local store).
+Map<String, Uint8List> exportRoomKeys() => Map.of(_roomKeys);
+void restoreRoomKeys(Map<String, Uint8List> keys) => _roomKeys.addAll(keys);
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 class RoomsState {
@@ -52,6 +56,11 @@ class RoomsState {
 class RoomsNotifier extends Notifier<RoomsState> {
   @override
   RoomsState build() => const RoomsState();
+
+  /// Restore joined rooms + message history from the encrypted local store.
+  void hydrate(List<JoinedRoom> joined, Map<String, List<RoomMessage>> messages) {
+    state = RoomsState(joined: joined, messages: messages);
+  }
 
   /// Derive key, subscribe to WS, update state. Throws on wrong password.
   Future<void> joinRoom({

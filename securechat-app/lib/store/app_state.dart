@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/network/api_client.dart';
+import 'package:securechat/store/local_store.dart';
 
 // ── Session state ─────────────────────────────────────────────────────────────
 
@@ -41,6 +42,8 @@ class SessionNotifier extends Notifier<SessionState> {
   }
 
   Future<void> logout() async {
+    final uid = state.identity?.userId;
+    if (uid != null) await deleteEncrypted('acct_$uid.json');
     await clearIdentity();
     state = const SessionState(isLoading: false);
   }
@@ -142,6 +145,8 @@ class ContactRequest {
 class ContactRequestNotifier extends Notifier<List<ContactRequest>> {
   @override
   List<ContactRequest> build() => [];
+
+  void hydrate(List<ContactRequest> requests) => state = requests;
 
   void addOrAppend(ContactRequest r) {
     final idx = state.indexWhere((x) => x.fromId == r.fromId);

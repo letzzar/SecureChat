@@ -40,6 +40,11 @@ class ConversationNotifier extends Notifier<ConversationState> {
   @override
   ConversationState build() => const ConversationState(byPeer: {});
 
+  /// Restore conversation history from the encrypted local store.
+  void hydrate(Map<String, List<ChatMessage>> byPeer) {
+    state = ConversationState(byPeer: byPeer);
+  }
+
   void addMessage(String peerId, ChatMessage msg) {
     state = state.withMessage(peerId, msg);
   }
