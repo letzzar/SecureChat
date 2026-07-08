@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-07-07 (seguridad + CI 7/7 verde + deps modernizadas + Release v0.5.0 publicada + workflow de releases)
+**Última actualización:** 2026-07-08 (seguridad + CI 7/7 + Release v0.5.0 + Docker multi-arch publicado en GHCR)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -60,7 +60,16 @@ Auditoría del diseño (§13) contra el código y cierre de todos los huecos. De
 - [x] `.github/workflows/release.yml` — al hacer push de un tag `v*` compila las 7 plataformas y publica la Release automáticamente. Uso: `git tag v0.6.0 && git push origin v0.6.0`. Tags con guion (`v1.0.0-rc1`) → prerelease. **El job `publish` aún no se ha ejecutado end-to-end** (los pasos de build sí están probados en verde).
 - Los binarios de la CI normal viven como *artifacts* de cada run (pestaña Actions), no en Releases; caducan a 90 días.
 
-**Nota de sincronización:** la copia en `/Volumes/...` es backup del NAS; se había quedado atrás respecto al `main` de GitHub y se resincronizó. Trabajar siempre desde `origin/main`. HEAD al cerrar: `3819e97`.
+**Docker (servidor) — sesión 2026-07-08:**
+- [x] `securechat-server/Dockerfile` — multi-stage Go + CGO/sqlite sobre Alpine; `.dockerignore` evita meter secreto/DB/binarios.
+- [x] `config/config.go` — overrides por entorno `SECURECHAT_*` (JWT_SECRET, DB_PATH, HOST, PORT, MODE, TLS, TLS_CERT/KEY) → el server arranca desde `docker run` sin fichero de config.
+- [x] `docker-compose.yml` (build) + `docker-compose.pull.yml` (imagen publicada) + `.env.example`.
+- [x] `.github/workflows/docker-publish.yml` — publica imagen **multi-arch (amd64+arm64)** en push a `main` que toque `securechat-server/**` y en tags `v*`. **GHCR siempre** (`ghcr.io/letzzar/securechat-server`), **Docker Hub** (`letzzar/securechat-server`) si están los secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`. Ya publicado en verde.
+- [x] `DOCKER.md` — guía bilingüe (arranque, compose con YAML de ejemplo, tabla de variables, TLS, publicación, backup).
+- **Pendiente (solo lo puede hacer el Director):** el repo es privado → la imagen GHCR nace **privada**. Para `docker pull` sin login: GitHub → perfil → Packages → `securechat-server` → Package settings → Change visibility → Public. (O `docker login ghcr.io` en el servidor). Para Docker Hub, añadir los 2 secrets.
+- Uso rápido: `docker run -d -e SECURECHAT_JWT_SECRET="$(openssl rand -hex 32)" -p 8443:8443 -v "$PWD/data:/data" ghcr.io/letzzar/securechat-server:latest` (el log muestra el código de invitación bootstrap).
+
+**Nota de sincronización:** la copia en `/Volumes/...` es backup del NAS; se había quedado atrás respecto al `main` de GitHub y se resincronizó. Trabajar siempre desde `origin/main`. HEAD al cerrar: `7511bba`.
 
 ### Completado en sesión 2026-05-07/08
 
