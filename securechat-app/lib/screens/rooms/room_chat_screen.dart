@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:securechat/models/room.dart';
+import 'package:securechat/screens/rooms/room_members_screen.dart';
 import 'package:securechat/store/app_state.dart';
 import 'package:securechat/store/file_transfer_store.dart';
 import 'package:securechat/store/messages_store.dart';
@@ -17,11 +18,13 @@ String _shortId(String userId) =>
 class RoomChatScreen extends ConsumerStatefulWidget {
   final String roomId;
   final String roomName;
+  final bool isPublic;
 
   const RoomChatScreen({
     super.key,
     required this.roomId,
     required this.roomName,
+    this.isPublic = false,
   });
 
   @override
@@ -102,6 +105,13 @@ class _RoomChatScreenState extends ConsumerState<RoomChatScreen> {
   }
 
   void _showMembers() {
+    // Public rooms have a server-backed member list with moderation.
+    if (widget.isPublic) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => RoomMembersScreen(roomId: widget.roomId, roomName: widget.roomName),
+      ));
+      return;
+    }
     final messages = ref.read(
       roomsProvider.select((s) => s.messages[widget.roomId] ?? []),
     );

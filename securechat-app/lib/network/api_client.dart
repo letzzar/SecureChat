@@ -160,4 +160,62 @@ class ApiClient {
     final list = jsonDecode(resp.body) as List;
     return list.cast<Map<String, dynamic>>();
   }
+
+  // ── Public rooms + moderation ──────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> _post(String path, [Map<String, dynamic>? body]) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: body == null ? null : jsonEncode(body),
+    );
+    final parsed = resp.body.isEmpty ? <String, dynamic>{} : jsonDecode(resp.body);
+    if (resp.statusCode != 200) {
+      final m = parsed is Map<String, dynamic> ? parsed : <String, dynamic>{};
+      throw ApiException(resp.statusCode, m['code'] ?? 'error', m['msg'] ?? 'Unknown error');
+    }
+    return parsed is Map<String, dynamic> ? parsed : <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> createPublicRoom(String roomName) =>
+      _post('/api/v1/rooms/public', {'room_name': roomName});
+
+  Future<List<Map<String, dynamic>>> searchPublicRooms(String query) async {
+    final resp = await http.get(
+      Uri.parse('$baseUrl/api/v1/rooms/public?q=${Uri.encodeQueryComponent(query)}'),
+      headers: _headers,
+    );
+    if (resp.statusCode != 200) {
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      throw ApiException(resp.statusCode, body['code'] ?? 'error', body['msg'] ?? 'Unknown error');
+    }
+    return (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> joinPublicRoom(String roomId) =>
+      _post('/api/v1/rooms/$roomId/join');
+
+  Future<List<Map<String, dynamic>>> roomMembers(String roomId) async {
+    final resp = await http.get(
+      Uri.parse('$baseUrl/api/v1/rooms/$roomId/members'),
+      headers: _headers,
+    );
+    if (resp.statusCode != 200) {
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      throw ApiException(resp.statusCode, body['code'] ?? 'error', body['msg'] ?? 'Unknown error');
+    }
+    return (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> kickMember(String roomId, String userId) =>
+      _post('/api/v1/rooms/$roomId/kick', {'user_id': userId});
+
+  Future<void> banMember(String roomId, String userId, int durationSecs) =>
+      _post('/api/v1/rooms/$roomId/ban', {'user_id': userId, 'duration_secs': durationSecs});
+
+  Future<void> unbanMember(String roomId, String userId) =>
+      _post('/api/v1/rooms/$roomId/unban', {'user_id': userId});
+
+  Future<void> setRoomAdmin(String roomId, String userId, bool grant) =>
+      _post('/api/v1/rooms/$roomId/admin', {'user_id': userId, 'grant': grant});
 }

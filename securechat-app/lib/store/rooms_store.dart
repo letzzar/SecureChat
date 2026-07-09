@@ -89,6 +89,27 @@ class RoomsNotifier extends Notifier<RoomsState> {
     ws.send({'type': 'room_join', 'room_id': roomId});
   }
 
+  /// Join a public room (server-visible, not E2E — no password/key).
+  void joinPublicRoom({
+    required String roomId,
+    required String roomName,
+    required WsClient ws,
+  }) {
+    state = state.withRoom(JoinedRoom(
+      roomId: roomId,
+      roomName: roomName,
+      saltHex: '',
+      isPublic: true,
+    ));
+    ws.send({'type': 'room_join', 'room_id': roomId});
+  }
+
+  /// Called when an admin kicked/banned us from a room.
+  void kicked(String roomId) {
+    _removeRoomKey(roomId);
+    state = state.withoutRoom(roomId);
+  }
+
   /// Re-subscribe to every joined room after a WS (re)connect. Room keys stay
   /// in memory, so no password re-entry is needed.
   void resendJoins(WsClient ws) {
@@ -114,18 +135,19 @@ class RoomsNotifier extends Notifier<RoomsState> {
     required WsClient ws,
   }) async {
     final key = getRoomKey(roomId);
-    if (key == null) throw StateError('No key for room $roomId');
-
-    final encrypted = await encryptRoomMessage(text, key);
+    final isPublic = state.joined.any((r) => r.roomId == roomId && r.isPublic);
     final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
-    ws.send({
-      'type': 'room_msg',
-      'room_id': roomId,
-      'nonce': 'enc',
-      'payload': encrypted,
-      'ts': ts,
-    });
+    if (key != null) {
+      // Private room — E2E with the room key.
+      final encrypted = await encryptRoomMessage(text, key);
+      ws.send({'type': 'room_msg', 'room_id': roomId, 'nonce': 'enc', 'payload': encrypted, 'ts': ts});
+    } else if (isPublic) {
+      // Public room — plaintext (base64), server-visible.
+      ws.send({'type': 'room_msg', 'room_id': roomId, 'nonce': 'plain', 'payload': base64Encode(utf8.encode(text)), 'ts': ts});
+    } else {
+      throw StateError('No key for room $roomId');
+    }
 
     // Optimistic local insert
     state = state.withMessage(
@@ -153,7 +175,8 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
   final ts = (msg['ts'] as int?) ?? 0;
 
   final key = getRoomKey(roomId);
-  if (key == null) return;
+  final isPublic = ref.read(roomsProvider).joined.any((r) => r.roomId == roomId && r.isPublic);
+  if (key == null && !isPublic) return;
 
   final myUserId = ref.read(sessionProvider).identity?.userId ?? '';
 
@@ -171,6 +194,7 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
   }
 
   if (nonce == 'file_offer') {
+    if (key == null) return; // file transfer is E2E (private rooms only)
     String decrypted;
     try {
       decrypted = await decryptRoomMessage(payload, key);
@@ -195,6 +219,7 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
   }
 
   if (nonce == 'file_chunk') {
+    if (key == null) return; // file transfer is E2E (private rooms only)
     String decrypted;
     try {
       decrypted = await decryptRoomMessage(payload, key);
@@ -219,10 +244,19 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
 
   // Regular text message
   String text;
-  try {
-    text = await decryptRoomMessage(payload, key);
-  } catch (_) {
-    text = '[decryption failed]';
+  if (key != null) {
+    try {
+      text = await decryptRoomMessage(payload, key);
+    } catch (_) {
+      text = '[decryption failed]';
+    }
+  } else {
+    // Public room — plaintext (base64).
+    try {
+      text = utf8.decode(base64Decode(payload));
+    } catch (_) {
+      text = payload;
+    }
   }
 
   ref.read(roomsProvider.notifier).addIncomingMessage(

@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/models/message.dart';
+import 'package:securechat/models/room.dart';
 import 'package:securechat/screens/chat/chat_screen.dart';
 import 'package:securechat/screens/rooms/create_room_screen.dart';
 import 'package:securechat/screens/rooms/join_room_screen.dart';
+import 'package:securechat/screens/rooms/public_rooms_screen.dart';
 import 'package:securechat/screens/rooms/room_chat_screen.dart';
 import 'package:securechat/store/app_state.dart';
 import 'package:securechat/store/messages_store.dart';
@@ -450,64 +452,37 @@ class _ConversationList extends ConsumerWidget {
   }
 }
 
-// ── Rooms Tab ─────────────────────────────────────────────────────────────────
+// ── Rooms Tab (Public + Private) ──────────────────────────────────────────────
 
-class _RoomsTab extends ConsumerWidget {
+class _RoomsTab extends StatelessWidget {
   const _RoomsTab();
 
   @override
+  Widget build(BuildContext context) {
+    return const DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          TabBar(tabs: [Tab(text: 'Public Rooms'), Tab(text: 'Private Rooms')]),
+          Expanded(
+            child: TabBarView(children: [_PublicRoomsList(), _PrivateRoomsList()]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrivateRoomsList extends ConsumerWidget {
+  const _PrivateRoomsList();
+
+  @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final joined = ref.watch(roomsProvider).joined;
-
+    final rooms = ref.watch(roomsProvider).joined.where((r) => !r.isPublic).toList();
     return Scaffold(
-      body: joined.isEmpty
-          ? const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.group_outlined, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text('No rooms joined yet', style: TextStyle(color: Colors.grey)),
-                  SizedBox(height: 8),
-                  Text('Create or join a room below', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                ],
-              ),
-            )
-          : ListView.builder(
-              itemCount: joined.length,
-              itemBuilder: (_, i) {
-                final room = joined[i];
-                final msgs = ref.watch(
-                  roomsProvider.select((s) => s.messages[room.roomId] ?? []),
-                );
-                final lastMsg = msgs.isNotEmpty ? msgs.last : null;
-
-                return ListTile(
-                  leading: CircleAvatar(
-                    child: Text(room.roomName[0].toUpperCase()),
-                  ),
-                  title: Text(room.roomName),
-                  subtitle: lastMsg != null
-                      ? Text(
-                          lastMsg.isOutgoing ? 'You: ${lastMsg.text}' : lastMsg.text,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        )
-                      : Text(
-                          '${room.roomId.substring(0, 16)}...',
-                          style: const TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => RoomChatScreen(
-                        roomId: room.roomId,
-                        roomName: room.roomName,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+      body: rooms.isEmpty
+          ? const _RoomsEmpty(text: 'No private rooms yet', hint: 'Create or join a room below')
+          : _RoomListView(rooms: rooms),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -532,6 +507,81 @@ class _RoomsTab extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _PublicRoomsList extends ConsumerWidget {
+  const _PublicRoomsList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final rooms = ref.watch(roomsProvider).joined.where((r) => r.isPublic).toList();
+    return Scaffold(
+      body: rooms.isEmpty
+          ? const _RoomsEmpty(text: 'No public rooms joined', hint: 'Browse public rooms below')
+          : _RoomListView(rooms: rooms),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'browse_public',
+        icon: const Icon(Icons.travel_explore),
+        label: const Text('Browse'),
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const PublicRoomsScreen()),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoomListView extends ConsumerWidget {
+  final List<JoinedRoom> rooms;
+  const _RoomListView({required this.rooms});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListView.builder(
+      itemCount: rooms.length,
+      itemBuilder: (_, i) {
+        final room = rooms[i];
+        final msgs = ref.watch(roomsProvider.select((s) => s.messages[room.roomId] ?? []));
+        final lastMsg = msgs.isNotEmpty ? msgs.last : null;
+        return ListTile(
+          leading: CircleAvatar(child: Text(room.roomName[0].toUpperCase())),
+          title: Text(room.roomName),
+          subtitle: lastMsg != null
+              ? Text(lastMsg.isOutgoing ? 'You: ${lastMsg.text}' : lastMsg.text,
+                  maxLines: 1, overflow: TextOverflow.ellipsis)
+              : Text(room.isPublic ? 'Public room' : 'Private room',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => RoomChatScreen(
+              roomId: room.roomId,
+              roomName: room.roomName,
+              isPublic: room.isPublic,
+            ),
+          )),
+        );
+      },
+    );
+  }
+}
+
+class _RoomsEmpty extends StatelessWidget {
+  final String text;
+  final String hint;
+  const _RoomsEmpty({required this.text, required this.hint});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.group_outlined, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text(text, style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 8),
+            Text(hint, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
+      );
 }
 
 // ── Profile Tab ───────────────────────────────────────────────────────────────

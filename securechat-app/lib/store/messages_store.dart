@@ -100,6 +100,10 @@ Future<void> dispatchIncoming(Map<String, dynamic> msg, WidgetRef ref) async {
     case 'room_msg':
       await dispatchRoomMsg(msg, ref);
 
+    case 'room_kicked':
+      final roomId = msg['room_id'] as String? ?? '';
+      if (roomId.isNotEmpty) ref.read(roomsProvider.notifier).kicked(roomId);
+
     case 'voice_joined':
       final participants = (msg['voice_participants'] as List<dynamic>?)
               ?.cast<String>() ??

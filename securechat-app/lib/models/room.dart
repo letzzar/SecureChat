@@ -2,20 +2,23 @@ class JoinedRoom {
   final String roomId;
   final String roomName;
   final String saltHex;
+  final bool isPublic; // public rooms are server-visible (not E2E)
 
   const JoinedRoom({
     required this.roomId,
     required this.roomName,
     required this.saltHex,
+    this.isPublic = false,
   });
 
   Map<String, dynamic> toJson() =>
-      {'roomId': roomId, 'roomName': roomName, 'saltHex': saltHex};
+      {'roomId': roomId, 'roomName': roomName, 'saltHex': saltHex, 'isPublic': isPublic};
 
   static JoinedRoom fromJson(Map<String, dynamic> j) => JoinedRoom(
         roomId: j['roomId'] as String,
         roomName: j['roomName'] as String,
-        saltHex: j['saltHex'] as String,
+        saltHex: j['saltHex'] as String? ?? '',
+        isPublic: j['isPublic'] as bool? ?? false,
       );
 }
 
