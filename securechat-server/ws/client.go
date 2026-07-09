@@ -348,6 +348,10 @@ func (c *Client) handleRoomJoin(msg *IncomingMessage) {
 		c.sendError("room_not_found", "Room does not exist")
 		return
 	}
+	if banned, _ := db.IsRoomBanned(c.database, msg.RoomID, c.userID); banned {
+		c.sendError("banned", "You are banned from this room")
+		return
+	}
 	c.hub.JoinRoom(msg.RoomID, c)
 	c.send <- &OutgoingMessage{Type: "room_joined", RoomID: msg.RoomID}
 }
@@ -370,6 +374,10 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 	exists, err := db.RoomExists(c.database, msg.RoomID)
 	if err != nil || !exists {
 		c.sendError("room_not_found", "Room does not exist")
+		return
+	}
+	if banned, _ := db.IsRoomBanned(c.database, msg.RoomID, c.userID); banned {
+		c.sendError("banned", "You are banned from this room")
 		return
 	}
 

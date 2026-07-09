@@ -80,10 +80,30 @@ func migrate(db *sql.DB) error {
 			last_seen INTEGER
 		);
 
+		CREATE TABLE IF NOT EXISTS room_admins (
+			room_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			role    TEXT NOT NULL DEFAULT 'admin',  -- 'owner' | 'admin'
+			PRIMARY KEY (room_id, user_id)
+		);
+
+		CREATE TABLE IF NOT EXISTS room_bans (
+			room_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			until   INTEGER NOT NULL DEFAULT 0,     -- 0 = permanent, else unix ts
+			PRIMARY KEY (room_id, user_id)
+		);
+
 		CREATE INDEX IF NOT EXISTS idx_offline_recipient ON offline_messages(recipient_id);
 		CREATE INDEX IF NOT EXISTS idx_offline_expires   ON offline_messages(expires_at);
 		CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_id);
 		CREATE INDEX IF NOT EXISTS idx_invites_expires   ON invites(expires_at);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Public rooms flag (idempotent — ignore "duplicate column" on re-runs).
+	db.Exec(`ALTER TABLE rooms ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }

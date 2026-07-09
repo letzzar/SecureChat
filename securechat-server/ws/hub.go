@@ -91,6 +91,27 @@ func (h *Hub) BroadcastRoom(roomID string, sender *Client, msg *OutgoingMessage)
 	}
 }
 
+// KickFromRoom removes userID from roomID's live subscribers and notifies them
+// (used by admin kick/ban).
+func (h *Hub) KickFromRoom(roomID, userID string) {
+	h.mu.Lock()
+	var c *Client
+	if members, ok := h.rooms[roomID]; ok {
+		c = members[userID]
+		delete(members, userID)
+		if len(members) == 0 {
+			delete(h.rooms, roomID)
+		}
+	}
+	h.mu.Unlock()
+	if c != nil {
+		select {
+		case c.send <- &OutgoingMessage{Type: "room_kicked", RoomID: roomID}:
+		default:
+		}
+	}
+}
+
 // RoomMemberCount returns active subscribers for a room.
 func (h *Hub) RoomMemberCount(roomID string) int {
 	h.mu.RLock()

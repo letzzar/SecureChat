@@ -37,6 +37,24 @@ func NewRouter(cfg *config.Config, database *sql.DB, hub *ws.Hub, sfuInst *sfu.S
 	mux.HandleFunc("GET /api/v1/rooms",
 		handlers.AuthMiddleware(cfg, handlers.SearchRooms(database)))
 
+	// ── Public rooms + moderation ─────────────────────────────────────────────
+	mux.HandleFunc("POST /api/v1/rooms/public",
+		handlers.AuthMiddleware(cfg, handlers.CreatePublicRoom(database)))
+	mux.HandleFunc("GET /api/v1/rooms/public",
+		handlers.AuthMiddleware(cfg, handlers.SearchPublicRooms(database)))
+	mux.HandleFunc("POST /api/v1/rooms/{room_id}/join",
+		handlers.AuthMiddleware(cfg, handlers.JoinPublicRoom(database)))
+	mux.HandleFunc("GET /api/v1/rooms/{room_id}/members",
+		handlers.AuthMiddleware(cfg, handlers.RoomMembers(database)))
+	mux.HandleFunc("POST /api/v1/rooms/{room_id}/kick",
+		handlers.AuthMiddleware(cfg, handlers.KickMember(database, hub.KickFromRoom)))
+	mux.HandleFunc("POST /api/v1/rooms/{room_id}/ban",
+		handlers.AuthMiddleware(cfg, handlers.BanMember(database, hub.KickFromRoom)))
+	mux.HandleFunc("POST /api/v1/rooms/{room_id}/unban",
+		handlers.AuthMiddleware(cfg, handlers.UnbanMember(database)))
+	mux.HandleFunc("POST /api/v1/rooms/{room_id}/admin",
+		handlers.AuthMiddleware(cfg, handlers.SetRoomAdmin(database)))
+
 	mux.HandleFunc("GET /api/v1/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(hub, database, cfg, sfuInst, fedClient, w, r)
 	})
