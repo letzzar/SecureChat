@@ -218,6 +218,30 @@ Future<void> saveJwt(String jwt) async {
   if (userId != null) await secureKV.write(key: _nk(userId, 'jwt'), value: jwt);
 }
 
+/// Change the stored server URL of account [userId] (keeps the same identity
+/// and JWT — e.g. switching a server from http to https). Returns true if the
+/// account changed was the active one.
+Future<bool> updateAccountServerUrl(String userId, String newUrl) async {
+  final accts = await listAccounts();
+  var found = false;
+  final updated = accts.map((a) {
+    if (a.userId == userId) {
+      found = true;
+      return AccountSummary(userId: a.userId, displayName: a.displayName, serverUrl: newUrl);
+    }
+    return a;
+  }).toList();
+  if (!found) return false;
+  await _saveAccounts(updated);
+
+  final active = await secureKV.read(key: _keyUserId);
+  if (active == userId) {
+    await secureKV.write(key: _keyServerUrl, value: newUrl);
+    return true;
+  }
+  return false;
+}
+
 /// Full wipe of ALL accounts and keys (hard reset).
 Future<void> clearIdentity() => secureKV.deleteAll();
 

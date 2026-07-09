@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:securechat/crypto/identity.dart';
 import 'package:securechat/models/message.dart';
 import 'package:securechat/screens/chat/chat_screen.dart';
 import 'package:securechat/screens/rooms/create_room_screen.dart';
@@ -598,8 +599,13 @@ class _ProfileTab extends ConsumerWidget {
                       ),
                       title: Text(a.displayName.isNotEmpty ? a.displayName : _shortUserId(a.userId)),
                       subtitle: Text(
-                        Uri.tryParse(a.serverUrl)?.host ?? a.serverUrl,
+                        a.serverUrl,
                         style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 20),
+                        tooltip: 'Edit server address',
+                        onPressed: () => _editServerUrl(context, ref, a),
                       ),
                       onTap: active
                           ? null
@@ -622,7 +628,16 @@ class _ProfileTab extends ConsumerWidget {
               ),
               error: (_, __) => const SizedBox(),
             ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+        const Text('Privacy', style: TextStyle(fontWeight: FontWeight.w600)),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Block messages from unknown people'),
+          subtitle: const Text('Only your accepted contacts can start a conversation.'),
+          value: ref.watch(blockUnknownProvider),
+          onChanged: (v) => ref.read(blockUnknownProvider.notifier).state = v,
+        ),
+        const SizedBox(height: 16),
         FilledButton.icon(
           icon: const Icon(Icons.person_add_outlined),
           label: const Text('Generate invite code'),
@@ -735,6 +750,50 @@ class _ProfileTab extends ConsumerWidget {
         );
       }
     }
+  }
+
+  void _editServerUrl(BuildContext context, WidgetRef ref, AccountSummary account) {
+    final controller = TextEditingController(text: account.serverUrl);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit server address'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Change the address of this server (e.g. http → https). Your identity on '
+              'this server is kept.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autocorrect: false,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'Server address',
+                hintText: 'https://chat.example.com',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final url = controller.text.trim().replaceAll(RegExp(r'/+$'), '');
+              Navigator.pop(ctx);
+              if (url.isNotEmpty) {
+                ref.read(sessionProvider.notifier).updateServerUrl(account.userId, url);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _confirmLogout(BuildContext context, WidgetRef ref) {

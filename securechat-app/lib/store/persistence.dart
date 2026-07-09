@@ -66,6 +66,7 @@ class PersistenceController {
           ((data['accepted'] as List?) ?? []).cast<String>().toSet();
       _ref.read(blockedUsersProvider.notifier).state =
           ((data['blocked'] as List?) ?? []).cast<String>().toSet();
+      _ref.read(blockUnknownProvider.notifier).state = data['blockUnknown'] as bool? ?? false;
       _ref.read(contactRequestsProvider.notifier).hydrate(
             ((data['contactRequests'] as List?) ?? []).map((r) {
               final m = (r as Map).cast<String, dynamic>();
@@ -95,6 +96,7 @@ class PersistenceController {
     _ref.read(knownPeersProvider.notifier).state = {};
     _ref.read(acceptedContactsProvider.notifier).state = {};
     _ref.read(blockedUsersProvider.notifier).state = {};
+    _ref.read(blockUnknownProvider.notifier).state = false;
     _ref.read(contactRequestsProvider.notifier).hydrate([]);
     await hydrate();
   }
@@ -120,6 +122,7 @@ class PersistenceController {
       'knownPeers': _ref.read(knownPeersProvider),
       'accepted': _ref.read(acceptedContactsProvider).toList(),
       'blocked': _ref.read(blockedUsersProvider).toList(),
+      'blockUnknown': _ref.read(blockUnknownProvider),
       'contactRequests': _ref.read(contactRequestsProvider).map((r) => {
             'fromId': r.fromId,
             'displayName': r.displayName,
@@ -138,6 +141,7 @@ final persistenceProvider = Provider<PersistenceController>((ref) {
   ref.listen(knownPeersProvider, (_, __) => c.scheduleSave());
   ref.listen(acceptedContactsProvider, (_, __) => c.scheduleSave());
   ref.listen(blockedUsersProvider, (_, __) => c.scheduleSave());
+  ref.listen(blockUnknownProvider, (_, __) => c.scheduleSave());
   ref.listen(contactRequestsProvider, (_, __) => c.scheduleSave());
   return c;
 });

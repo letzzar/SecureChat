@@ -51,6 +51,27 @@ class SessionNotifier extends Notifier<SessionState> {
     await ref.read(persistenceProvider).reloadForActiveAccount();
   }
 
+  /// Change the server address of [userId] (same identity). If it's the active
+  /// account, the WebSocket/API reconnect to the new URL automatically.
+  Future<void> updateServerUrl(String userId, String newUrl) async {
+    final activeChanged = await updateAccountServerUrl(userId, newUrl);
+    if (activeChanged && state.identity != null) {
+      final a = state.identity!;
+      state = SessionState(
+        identity: LocalIdentity(
+          userId: a.userId,
+          displayName: a.displayName,
+          serverUrl: newUrl,
+          jwt: a.jwt,
+          x25519Public: a.x25519Public,
+          ed25519Public: a.ed25519Public,
+        ),
+        isLoading: false,
+      );
+    }
+    ref.invalidate(accountsProvider);
+  }
+
   /// Remove the active account. If other servers remain, switch to one of them;
   /// otherwise return to the setup screen.
   Future<void> logout() async {
@@ -137,6 +158,10 @@ final acceptedContactsProvider = StateProvider<Set<String>>((ref) => {});
 
 // Users whose messages are silently dropped
 final blockedUsersProvider = StateProvider<Set<String>>((ref) => {});
+
+// Privacy: when true, messages from people who aren't accepted contacts are
+// silently dropped (strangers cannot start a conversation with you).
+final blockUnknownProvider = StateProvider<bool>((ref) => false);
 
 // ── Contact requests ──────────────────────────────────────────────────────────
 

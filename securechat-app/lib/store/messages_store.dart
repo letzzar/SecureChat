@@ -213,6 +213,12 @@ Future<void> _onFileOffer(
   final fileId = msg['file_id'] as String? ?? '';
   if (fileId.isEmpty || fromId.isEmpty) return;
 
+  // Privacy: ignore file offers from non-accepted senders when enabled.
+  if (ref.read(blockedUsersProvider).contains(fromId)) return;
+  if (ref.read(blockUnknownProvider) && !ref.read(acceptedContactsProvider).contains(fromId)) {
+    return;
+  }
+
   var knownPeers = ref.read(knownPeersProvider);
   String peerPubHex = knownPeers[fromId]?['public_key'] as String? ?? '';
   if (peerPubHex.isEmpty) {
@@ -357,6 +363,11 @@ Future<void> _onDM(Map<String, dynamic> msg, LocalIdentity identity, WidgetRef r
 
   // Silently drop messages from blocked users
   if (ref.read(blockedUsersProvider).contains(fromId)) return;
+
+  // Privacy: optionally drop messages from people who aren't accepted contacts.
+  if (ref.read(blockUnknownProvider) && !ref.read(acceptedContactsProvider).contains(fromId)) {
+    return;
+  }
 
   // Fetch peer keys if unknown or if the cached entry lacks sign_public
   // (e.g. it was cached by sendDM, which only stores public_key).
