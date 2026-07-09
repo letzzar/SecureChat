@@ -19,6 +19,7 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
   final _portController = TextEditingController(text: '8443');
   final _nameController = TextEditingController();
   final _inviteController = TextEditingController();
+  bool _specifyPort = false;
   bool _loading = false;
   String? _error;
 
@@ -47,7 +48,7 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
     final host = (parsed != null && parsed.host.isNotEmpty)
         ? parsed.host
         : addr.replaceFirst(RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://'), '').split('/').first.split(':').first;
-    final port = int.tryParse(_portController.text.trim()) ?? 8443;
+    final port = _specifyPort ? (int.tryParse(_portController.text.trim()) ?? 8443) : 8443;
     final serverUrl = '$scheme://$host:$port';
     final displayName = _nameController.text.trim();
 
@@ -152,23 +153,33 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _portController,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
-                      hintText: '8443',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.settings_ethernet),
-                    ),
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                    validator: (v) {
-                      final p = int.tryParse((v ?? '').trim());
-                      if (p == null || p < 1 || p > 65535) return 'Enter a valid port (1-65535)';
-                      return null;
-                    },
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Specify port'),
+                    subtitle: const Text('Off = use 8443'),
+                    value: _specifyPort,
+                    onChanged: (v) => setState(() => _specifyPort = v ?? false),
                   ),
+                  if (_specifyPort) ...[
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _portController,
+                      decoration: const InputDecoration(
+                        labelText: 'Port',
+                        hintText: '8443',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.settings_ethernet),
+                      ),
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.next,
+                      validator: (v) {
+                        final p = int.tryParse((v ?? '').trim());
+                        if (p == null || p < 1 || p > 65535) return 'Enter a valid port (1-65535)';
+                        return null;
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: _nameController,
