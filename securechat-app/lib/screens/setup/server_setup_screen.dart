@@ -15,7 +15,8 @@ class ServerSetupScreen extends ConsumerStatefulWidget {
 
 class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _urlController = TextEditingController(text: 'http://');
+  final _urlController = TextEditingController(text: 'https://');
+  final _portController = TextEditingController(text: '8443');
   final _nameController = TextEditingController();
   final _inviteController = TextEditingController();
   bool _loading = false;
@@ -24,6 +25,7 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
   @override
   void dispose() {
     _urlController.dispose();
+    _portController.dispose();
     _nameController.dispose();
     _inviteController.dispose();
     super.dispose();
@@ -37,7 +39,16 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
       _error = null;
     });
 
-    final serverUrl = _urlController.text.trim().replaceAll(RegExp(r'/+$'), '');
+    // Combine the address (scheme + host, https by default) with the separate
+    // port field into the final server URL.
+    final addr = _urlController.text.trim();
+    final parsed = Uri.tryParse(addr);
+    final scheme = (parsed != null && parsed.hasScheme) ? parsed.scheme : 'https';
+    final host = (parsed != null && parsed.host.isNotEmpty)
+        ? parsed.host
+        : addr.replaceFirst(RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://'), '').split('/').first.split(':').first;
+    final port = int.tryParse(_portController.text.trim()) ?? 8443;
+    final serverUrl = '$scheme://$host:$port';
     final displayName = _nameController.text.trim();
 
     try {
@@ -137,7 +148,24 @@ class _ServerSetupScreenState extends ConsumerState<ServerSetupScreen> {
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Required';
                       final uri = Uri.tryParse(v.trim());
-                      if (uri == null || !uri.hasScheme) return 'Enter a valid URL';
+                      if (uri == null || uri.host.isEmpty) return 'Enter a valid address';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _portController,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      hintText: '8443',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.settings_ethernet),
+                    ),
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    validator: (v) {
+                      final p = int.tryParse((v ?? '').trim());
+                      if (p == null || p < 1 || p > 65535) return 'Enter a valid port (1-65535)';
                       return null;
                     },
                   ),
