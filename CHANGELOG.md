@@ -9,7 +9,7 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ---
 
-## 2026-07-10 — Public rooms, room federation, encryption at rest
+## v0.7.0 — 2026-07-10 — Public rooms, room federation (F1–F4), encryption at rest
 
 ### Added
 - **Public rooms (Telegram-style).** Open-join, discoverable, server-visible
@@ -38,6 +38,15 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
   disconnect to subscribed peers (`room_kicked`), and drops relayed messages from
   banned users. The client is unchanged. New S2S: `/s2s/room/{id}/members`,
   `/s2s/room/{moderate,kicked}`.
+- **Room federation — phase 4 (private rooms cross-server).** A private (E2E)
+  room hosted on a federated peer can now be joined from another server: the
+  invite carries the host's `server_url`, and the client routes the join through
+  the active server's S2S relay while the room key never leaves the device.
+  **Metadata privacy:** the sender identity is carried **inside the ciphertext**,
+  and the outer `from` is stripped whenever a private-room message crosses a
+  federation boundary — so the host (which lacks the room key) only ever sees
+  `room_id` + opaque payload, never who is in the room or who is talking.
+  Subscribe/unsubscribe to a private remote room are likewise anonymous.
 - **Encryption at rest (server).** `SECURECHAT_DB_KEY` encrypts the SQLite
   database with **SQLCipher (AES-256)**. Without the key the DB file is illegible
   even if the disk is seized; the key is supplied at startup and never written to
@@ -49,6 +58,10 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
   8443, HTTPS by default); a **"Block messages from unknown people"** privacy toggle.
 
 ### Changed
+- **App display name is now "SecureChat"** across all platforms (Android
+  `android:label`, iOS `CFBundleDisplayName`, macOS `PRODUCT_NAME`, and the
+  Linux/Windows window titles). Build identifiers (package/bundle id, binary and
+  icon file names) are unchanged.
 - Server Docker image now builds on **Debian (glibc)** instead of Alpine —
   go-sqlcipher's vendored SQLite does not compile against musl.
 - SQLite driver switched from `mattn/go-sqlite3` to `mutecomm/go-sqlcipher`.
