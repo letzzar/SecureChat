@@ -32,6 +32,12 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
   subscribers. Content is relayed **opaquely** (E2E ciphertext for private rooms,
   plaintext for public) — nothing is stored or replicated cross-server.
   New S2S endpoints: `/s2s/rooms/public`, `/s2s/room/{subscribe,unsubscribe,message}`.
+- **Room federation — phase 3 (moderation).** Member list and kick/ban/unban/
+  promote/demote of a remote room are proxied to the room's home over S2S (the
+  caller is asserted as actor); the home performs the action, propagates the
+  disconnect to subscribed peers (`room_kicked`), and drops relayed messages from
+  banned users. The client is unchanged. New S2S: `/s2s/room/{id}/members`,
+  `/s2s/room/{moderate,kicked}`.
 - **Encryption at rest (server).** `SECURECHAT_DB_KEY` encrypts the SQLite
   database with **SQLCipher (AES-256)**. Without the key the DB file is illegible
   even if the disk is seized; the key is supplied at startup and never written to

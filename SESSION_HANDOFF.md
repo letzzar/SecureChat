@@ -28,7 +28,7 @@
 | 5 | Endurecimiento de seguridad (auditoría §13) + CI + modernización deps | ✅ Completo |
 | 6 | Persistencia local cifrada (DMs + salas) + multi-servidor (identidad por servidor) | ✅ Completo |
 | 7 | Salas públicas (tipo Telegram) + moderación (kick/ban/admins) | ✅ Completo |
-| 8 | Federación de salas: F1 descubrimiento + F2 participación remota | ✅ (F3/F4 pendientes) |
+| 8 | Federación de salas: F1 descubrimiento + F2 participación + F3 moderación remota | ✅ (F4 pendiente) |
 | 9 | Cifrado en reposo del servidor (SQLCipher AES-256, `SECURECHAT_DB_KEY`) | ✅ Completo |
 
 ### Completado en sesión 2026-07-10
@@ -38,7 +38,8 @@
 - **Federación de salas F2 (participación remota):** origen autoritativo + fan-out; registro de peers-suscritos **solo en RAM**; relay **opaco** (ciphertext en privadas, texto en públicas), nada se almacena/replica. `/s2s/room/{subscribe,unsubscribe,message}`; cliente `JoinedRoom.homeUrl` + `home` en room_join.
 - **Cifrado en reposo del servidor:** `SECURECHAT_DB_KEY` → SQLCipher AES-256; migración automática de DB plana (deja `.plaintext.bak`, **hay que borrarlo**). Driver mattn→mutecomm/go-sqlcipher; Docker pasó a **Debian (glibc)** (musl no compila go-sqlcipher). Verificado: fichero sin cabecera SQLite, `sqlite3` plano no lo abre. **Perder la clave = DB irrecuperable.**
 - Cliente: editar servidor (http→https), toggle "Specify port" (8443 por defecto, https por defecto), toggle privacidad "Block unknown".
-- **Pendiente:** F3 (moderación de salas remotas) — en curso; F4 (salas privadas remotas: cablear join por `server_url` de la invitación, infra ya lista).
+- **Federación F3 (moderación remota):** los handlers de moderación proxean al origen por S2S (member list + kick/ban/unban/promote/demote); el origen propaga la desconexión a los peers y descarta mensajes de baneados. Cliente sin cambios. `/s2s/room/{id}/members`, `/s2s/room/{moderate,kicked}`.
+- **Pendiente:** F4 (salas privadas remotas: cablear el join privado por el `server_url` de la invitación; la infra de relay opaco ya lo soporta).
 
 ### Completado en sesión 2026-07-07 (seguridad + CI + deps)
 
