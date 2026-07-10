@@ -285,6 +285,12 @@ func S2SRoomMessage(cfg *config.Config, database *sql.DB, hub *ws.Hub, fedClient
 			return
 		}
 
+		// Drop messages from banned users (enforced on the room's home).
+		if banned, _ := db.IsRoomBanned(database, m.RoomID, m.From); banned {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
 		out := &ws.OutgoingMessage{
 			Type:    "room_msg",
 			From:    m.From,
@@ -322,6 +328,68 @@ func S2SRoomMessage(cfg *config.Config, database *sql.DB, hub *ws.Hub, fedClient
 			}
 		}
 		w.WriteHeader(http.StatusAccepted)
+	})
+}
+
+// S2SRoomMembers returns the member list of a room hosted here (queried by a peer).
+func S2SRoomMembers(cfg *config.Config, database *sql.DB) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		roomID := r.PathValue("room_id")
+		members, err := db.RoomMembersDetailed(database, roomID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "db_error", "Database error")
+			return
+		}
+		type memberJSON struct {
+			UserID      string `json:"user_id"`
+			DisplayName string `json:"display_name"`
+			Role        string `json:"role"`
+		}
+		out := make([]memberJSON, 0, len(members))
+		for _, m := range members {
+			out = append(out, memberJSON{m.UserID, m.DisplayName, m.Role})
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+}
+
+// S2SRoomModerate performs a moderation action on a room hosted here, on behalf
+// of a user asserted by a trusted peer.
+func S2SRoomModerate(cfg *config.Config, database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			RoomID       string `json:"room_id"`
+			Actor        string `json:"actor"`
+			Action       string `json:"action"`
+			Target       string `json:"target"`
+			DurationSecs int64  `json:"duration_secs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RoomID == "" || req.Target == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "room_id, actor, target required")
+			return
+		}
+		if status, code := applyModeration(database, hub, fedClient, req.RoomID, req.Actor, req.Action, req.Target, req.DurationSecs); status != http.StatusOK {
+			writeError(w, status, code, code)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+}
+
+// S2SRoomKicked disconnects a user from a room's local subscribers (told by the
+// room's home after a kick/ban).
+func S2SRoomKicked(cfg *config.Config, hub *ws.Hub) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			RoomID string `json:"room_id"`
+			UserID string `json:"user_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RoomID == "" || req.UserID == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "room_id and user_id required")
+			return
+		}
+		hub.KickFromRoom(req.RoomID, req.UserID)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 }
 

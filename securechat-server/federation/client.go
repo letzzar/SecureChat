@@ -230,6 +230,43 @@ func (c *Client) RelayRoomMessage(peer *db.FederationPeer, msg *RoomRelayMsg) er
 	return c.postJSON(peer, "/s2s/room/message", msg)
 }
 
+// RoomMembersRemote fetches the member list of a room hosted on [peer].
+func (c *Client) RoomMembersRemote(peer *db.FederationPeer, roomID string) ([]map[string]any, error) {
+	req, err := http.NewRequest("GET", peer.URL+"/s2s/room/"+url.PathEscape(roomID)+"/members", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Federation-Secret", peer.Secret)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("peer %s returned %d", peer.URL, resp.StatusCode)
+	}
+	var out []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RoomModerate asks the room's home [peer] to perform a moderation action on
+// behalf of [actor] (kick / ban / unban / promote / demote).
+func (c *Client) RoomModerate(peer *db.FederationPeer, roomID, actor, action, target string, durationSecs int64) error {
+	return c.postJSON(peer, "/s2s/room/moderate", map[string]any{
+		"room_id": roomID, "actor": actor, "action": action,
+		"target": target, "duration_secs": durationSecs,
+	})
+}
+
+// NotifyKicked tells a peer to disconnect a kicked/banned user from a room.
+func (c *Client) NotifyKicked(peer *db.FederationPeer, roomID, userID string) error {
+	return c.postJSON(peer, "/s2s/room/kicked",
+		map[string]any{"room_id": roomID, "user_id": userID})
+}
+
 func (c *Client) postJSON(peer *db.FederationPeer, path string, v any) error {
 	body, err := json.Marshal(v)
 	if err != nil {

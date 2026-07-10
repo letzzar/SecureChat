@@ -11,6 +11,7 @@ import (
 	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
 	"github.com/securechat/server/federation"
+	"github.com/securechat/server/ws"
 )
 
 func randomRoomID() string {
@@ -131,11 +132,27 @@ func JoinPublicRoom(database *sql.DB) http.HandlerFunc {
 	}
 }
 
-// RoomMembers lists a public room's members with their roles (members only).
-func RoomMembers(database *sql.DB) http.HandlerFunc {
+// RoomMembers lists a public room's members with their roles. For a room hosted
+// on a federated peer, it proxies the query to that peer.
+func RoomMembers(database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value(ContextUserID).(string)
 		roomID := r.PathValue("room_id")
+
+		if home := hub.RemoteRoomHome(roomID); home != "" {
+			peer := peerByURL(database, home)
+			if peer == nil || fedClient == nil {
+				writeError(w, http.StatusBadGateway, "no_home", "Room host unreachable")
+				return
+			}
+			members, err := fedClient.RoomMembersRemote(peer, roomID)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "home_error", "Could not fetch members")
+				return
+			}
+			writeJSON(w, http.StatusOK, members)
+			return
+		}
 
 		isMember, _ := db.IsRoomMember(database, roomID, userID)
 		if !isMember {
@@ -166,114 +183,161 @@ func requireAdmin(database *sql.DB, roomID, userID string) string {
 	return role // "owner" | "admin" | ""
 }
 
-// KickMember removes a member from a public room (they may rejoin unless banned).
-func KickMember(database *sql.DB, kick func(roomID, userID string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		callerID, _ := r.Context().Value(ContextUserID).(string)
-		roomID := r.PathValue("room_id")
-		var req struct {
-			UserID string `json:"user_id"`
+func peerByURL(database *sql.DB, url string) *db.FederationPeer {
+	peers, _ := db.GetFederationPeers(database)
+	for _, p := range peers {
+		if p.URL == url {
+			return p
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
-			writeError(w, http.StatusBadRequest, "invalid_request", "user_id required")
-			return
+	}
+	return nil
+}
+
+// disconnectFromRoom kicks a user from local subscribers and tells subscribed
+// federated peers to do the same.
+func disconnectFromRoom(database *sql.DB, hub *ws.Hub, fedClient *federation.Client, roomID, userID string) {
+	hub.KickFromRoom(roomID, userID)
+	if fedClient == nil {
+		return
+	}
+	peerURLs := hub.RoomPeers(roomID)
+	if len(peerURLs) == 0 {
+		return
+	}
+	peers, _ := db.GetFederationPeers(database)
+	byURL := make(map[string]*db.FederationPeer, len(peers))
+	for _, p := range peers {
+		byURL[p.URL] = p
+	}
+	for _, u := range peerURLs {
+		if p := byURL[u]; p != nil {
+			go fedClient.NotifyKicked(p, roomID, userID)
 		}
-		if !canModerate(database, roomID, callerID, req.UserID) {
-			writeError(w, http.StatusForbidden, "forbidden", "Not allowed")
-			return
-		}
-		_ = db.RemoveRoomMember(database, roomID, req.UserID)
-		kick(roomID, req.UserID)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
 
-// BanMember bans a member (durationSecs 0 = permanent) and removes them.
-func BanMember(database *sql.DB, kick func(roomID, userID string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		callerID, _ := r.Context().Value(ContextUserID).(string)
-		roomID := r.PathValue("room_id")
-		var req struct {
-			UserID       string `json:"user_id"`
-			DurationSecs int64  `json:"duration_secs"` // 0 = permanent
+// applyModeration performs a moderation action on a room hosted by THIS server.
+// Returns an HTTP status and an error code ("" on success).
+func applyModeration(database *sql.DB, hub *ws.Hub, fedClient *federation.Client, roomID, actor, action, target string, duration int64) (int, string) {
+	switch action {
+	case "kick":
+		if !canModerate(database, roomID, actor, target) {
+			return http.StatusForbidden, "forbidden"
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
-			writeError(w, http.StatusBadRequest, "invalid_request", "user_id required")
-			return
-		}
-		if !canModerate(database, roomID, callerID, req.UserID) {
-			writeError(w, http.StatusForbidden, "forbidden", "Not allowed")
-			return
+		_ = db.RemoveRoomMember(database, roomID, target)
+		disconnectFromRoom(database, hub, fedClient, roomID, target)
+	case "ban":
+		if !canModerate(database, roomID, actor, target) {
+			return http.StatusForbidden, "forbidden"
 		}
 		var until int64
-		if req.DurationSecs > 0 {
-			until = time.Now().Unix() + req.DurationSecs
+		if duration > 0 {
+			until = time.Now().Unix() + duration
 		}
-		if err := db.BanRoomUser(database, roomID, req.UserID, until); err != nil {
-			writeError(w, http.StatusInternalServerError, "db_error", "Could not ban")
+		if err := db.BanRoomUser(database, roomID, target, until); err != nil {
+			return http.StatusInternalServerError, "db_error"
+		}
+		disconnectFromRoom(database, hub, fedClient, roomID, target)
+	case "unban":
+		if requireAdmin(database, roomID, actor) == "" {
+			return http.StatusForbidden, "forbidden"
+		}
+		_ = db.UnbanRoomUser(database, roomID, target)
+	case "promote":
+		if requireAdmin(database, roomID, actor) == "" {
+			return http.StatusForbidden, "forbidden"
+		}
+		if m, _ := db.IsRoomMember(database, roomID, target); !m {
+			return http.StatusBadRequest, "not_member"
+		}
+		_ = db.SetRoomAdmin(database, roomID, target, "admin")
+	case "demote":
+		if requireAdmin(database, roomID, actor) != "owner" {
+			return http.StatusForbidden, "owner_only"
+		}
+		_ = db.RemoveRoomAdmin(database, roomID, target)
+	default:
+		return http.StatusBadRequest, "bad_action"
+	}
+	return http.StatusOK, ""
+}
+
+// clientModerate handles a client moderation request: proxy to the room's home
+// if remote, else apply locally.
+func clientModerate(w http.ResponseWriter, r *http.Request, database *sql.DB, hub *ws.Hub, fedClient *federation.Client, action, target string, duration int64) {
+	callerID, _ := r.Context().Value(ContextUserID).(string)
+	roomID := r.PathValue("room_id")
+	if target == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "user_id required")
+		return
+	}
+	if home := hub.RemoteRoomHome(roomID); home != "" {
+		peer := peerByURL(database, home)
+		if peer == nil || fedClient == nil {
+			writeError(w, http.StatusBadGateway, "no_home", "Room host unreachable")
 			return
 		}
-		kick(roomID, req.UserID)
+		if err := fedClient.RoomModerate(peer, roomID, callerID, action, target, duration); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not allowed or host error")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	if status, code := applyModeration(database, hub, fedClient, roomID, callerID, action, target, duration); status != http.StatusOK {
+		writeError(w, status, code, code)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// KickMember removes a member from a public room (they may rejoin unless banned).
+func KickMember(database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			UserID string `json:"user_id"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		clientModerate(w, r, database, hub, fedClient, "kick", req.UserID, 0)
+	}
+}
+
+// BanMember bans a member (duration_secs 0 = permanent) and removes them.
+func BanMember(database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			UserID       string `json:"user_id"`
+			DurationSecs int64  `json:"duration_secs"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		clientModerate(w, r, database, hub, fedClient, "ban", req.UserID, req.DurationSecs)
 	}
 }
 
 // UnbanMember lifts a ban.
-func UnbanMember(database *sql.DB) http.HandlerFunc {
+func UnbanMember(database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		callerID, _ := r.Context().Value(ContextUserID).(string)
-		roomID := r.PathValue("room_id")
 		var req struct {
 			UserID string `json:"user_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
-			writeError(w, http.StatusBadRequest, "invalid_request", "user_id required")
-			return
-		}
-		if requireAdmin(database, roomID, callerID) == "" {
-			writeError(w, http.StatusForbidden, "forbidden", "Not an admin")
-			return
-		}
-		_ = db.UnbanRoomUser(database, roomID, req.UserID)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		json.NewDecoder(r.Body).Decode(&req)
+		clientModerate(w, r, database, hub, fedClient, "unban", req.UserID, 0)
 	}
 }
 
-// SetRoomAdmin promotes or demotes a member. Admins can promote members;
-// only the owner can demote an admin.
-func SetRoomAdmin(database *sql.DB) http.HandlerFunc {
+// SetRoomAdmin promotes or demotes a member.
+func SetRoomAdmin(database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		callerID, _ := r.Context().Value(ContextUserID).(string)
-		roomID := r.PathValue("room_id")
 		var req struct {
 			UserID string `json:"user_id"`
 			Grant  bool   `json:"grant"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
-			writeError(w, http.StatusBadRequest, "invalid_request", "user_id required")
-			return
-		}
-		callerRole := requireAdmin(database, roomID, callerID)
-		if callerRole == "" {
-			writeError(w, http.StatusForbidden, "forbidden", "Not an admin")
-			return
-		}
+		json.NewDecoder(r.Body).Decode(&req)
+		action := "demote"
 		if req.Grant {
-			// Admins and the owner can promote a member to admin.
-			if isMember, _ := db.IsRoomMember(database, roomID, req.UserID); !isMember {
-				writeError(w, http.StatusBadRequest, "not_member", "User is not a member")
-				return
-			}
-			_ = db.SetRoomAdmin(database, roomID, req.UserID, "admin")
-		} else {
-			// Only the owner can demote an admin.
-			if callerRole != "owner" {
-				writeError(w, http.StatusForbidden, "owner_only", "Only the owner can demote admins")
-				return
-			}
-			_ = db.RemoveRoomAdmin(database, roomID, req.UserID)
+			action = "promote"
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		clientModerate(w, r, database, hub, fedClient, action, req.UserID, 0)
 	}
 }
 

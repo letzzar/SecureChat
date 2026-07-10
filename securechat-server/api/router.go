@@ -45,15 +45,15 @@ func NewRouter(cfg *config.Config, database *sql.DB, hub *ws.Hub, sfuInst *sfu.S
 	mux.HandleFunc("POST /api/v1/rooms/{room_id}/join",
 		handlers.AuthMiddleware(cfg, handlers.JoinPublicRoom(database)))
 	mux.HandleFunc("GET /api/v1/rooms/{room_id}/members",
-		handlers.AuthMiddleware(cfg, handlers.RoomMembers(database)))
+		handlers.AuthMiddleware(cfg, handlers.RoomMembers(database, hub, fedClient)))
 	mux.HandleFunc("POST /api/v1/rooms/{room_id}/kick",
-		handlers.AuthMiddleware(cfg, handlers.KickMember(database, hub.KickFromRoom)))
+		handlers.AuthMiddleware(cfg, handlers.KickMember(database, hub, fedClient)))
 	mux.HandleFunc("POST /api/v1/rooms/{room_id}/ban",
-		handlers.AuthMiddleware(cfg, handlers.BanMember(database, hub.KickFromRoom)))
+		handlers.AuthMiddleware(cfg, handlers.BanMember(database, hub, fedClient)))
 	mux.HandleFunc("POST /api/v1/rooms/{room_id}/unban",
-		handlers.AuthMiddleware(cfg, handlers.UnbanMember(database)))
+		handlers.AuthMiddleware(cfg, handlers.UnbanMember(database, hub, fedClient)))
 	mux.HandleFunc("POST /api/v1/rooms/{room_id}/admin",
-		handlers.AuthMiddleware(cfg, handlers.SetRoomAdmin(database)))
+		handlers.AuthMiddleware(cfg, handlers.SetRoomAdmin(database, hub, fedClient)))
 
 	mux.HandleFunc("GET /api/v1/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(hub, database, cfg, sfuInst, fedClient, w, r)
@@ -85,6 +85,12 @@ func NewRouter(cfg *config.Config, database *sql.DB, hub *ws.Hub, sfuInst *sfu.S
 		handlers.S2SRoomUnsubscribe(cfg, database, hub))
 	mux.HandleFunc("POST /s2s/room/message",
 		handlers.S2SRoomMessage(cfg, database, hub, fedClient))
+	mux.HandleFunc("GET /s2s/room/{room_id}/members",
+		handlers.S2SRoomMembers(cfg, database))
+	mux.HandleFunc("POST /s2s/room/moderate",
+		handlers.S2SRoomModerate(cfg, database, hub, fedClient))
+	mux.HandleFunc("POST /s2s/room/kicked",
+		handlers.S2SRoomKicked(cfg, hub))
 
 	return mux
 }
