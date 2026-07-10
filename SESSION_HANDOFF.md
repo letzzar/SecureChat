@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-07-10 (salas públicas + moderación, federación de salas F1/F2, cifrado en reposo del servidor SQLCipher)
+**Última actualización:** 2026-07-10 (release **v0.7.0**: federación de salas F1–F4, salas públicas + moderación, cifrado en reposo SQLCipher, rename de apps a "SecureChat")
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -28,7 +28,7 @@
 | 5 | Endurecimiento de seguridad (auditoría §13) + CI + modernización deps | ✅ Completo |
 | 6 | Persistencia local cifrada (DMs + salas) + multi-servidor (identidad por servidor) | ✅ Completo |
 | 7 | Salas públicas (tipo Telegram) + moderación (kick/ban/admins) | ✅ Completo |
-| 8 | Federación de salas: F1 descubrimiento + F2 participación + F3 moderación remota | ✅ (F4 pendiente) |
+| 8 | Federación de salas: F1 descubrimiento + F2 participación + F3 moderación remota + F4 salas privadas cross-server | ✅ Completo |
 | 9 | Cifrado en reposo del servidor (SQLCipher AES-256, `SECURECHAT_DB_KEY`) | ✅ Completo |
 
 ### Completado en sesión 2026-07-10
@@ -38,6 +38,9 @@
 - **Federación de salas F2 (participación remota):** origen autoritativo + fan-out; registro de peers-suscritos **solo en RAM**; relay **opaco** (ciphertext en privadas, texto en públicas), nada se almacena/replica. `/s2s/room/{subscribe,unsubscribe,message}`; cliente `JoinedRoom.homeUrl` + `home` en room_join.
 - **Cifrado en reposo del servidor:** `SECURECHAT_DB_KEY` → SQLCipher AES-256; migración automática de DB plana (deja `.plaintext.bak`, **hay que borrarlo**). Driver mattn→mutecomm/go-sqlcipher; Docker pasó a **Debian (glibc)** (musl no compila go-sqlcipher). Verificado: fichero sin cabecera SQLite, `sqlite3` plano no lo abre. **Perder la clave = DB irrecuperable.**
 - Cliente: editar servidor (http→https), toggle "Specify port" (8443 por defecto, https por defecto), toggle privacidad "Block unknown".
+- **Federación de salas F4 (salas privadas cross-server):** una sala privada E2E alojada en un peer se une desde otro servidor. La invitación lleva `server_url` (el anfitrión); el cliente enruta la unión por el relay S2S del servidor activo y la `room_key` nunca sale del dispositivo. **Privacidad de metadatos:** el remitente viaja **dentro del ciphertext** y el `from` externo se elimina al cruzar la frontera de federación → el anfitrión solo ve `room_id` + payload opaco (nunca quién está ni quién habla); subscribe/unsubscribe a sala privada remota son anónimos. La ruta de envío remota entrega ya a los suscriptores locales y etiqueta `Origin` para evitar auto-eco duplicado. Servidor: `IncomingMessage.Private`, `hub.remotePrivate`, strip de `from` en `client.go`. Cliente: `joinRoom(homeUrl)`, payload privado `{v,from,text}`.
+- **Rename:** nombre visible de las apps unificado a **"SecureChat"** en todas las plataformas (Android `android:label`, iOS `CFBundleDisplayName`, macOS `PRODUCT_NAME`, títulos de ventana Linux/Windows + version-info Windows). Identificadores de build (package/bundle id, nombres de binario e icono) sin cambios.
+- **Release v0.7.0:** `pubspec` bumped a `0.7.0+3`; tag `v0.7.0` empujado → workflow `release.yml` construye y publica la GitHub Release.
 - **Federación F3 (moderación remota):** los handlers de moderación proxean al origen por S2S (member list + kick/ban/unban/promote/demote); el origen propaga la desconexión a los peers y descarta mensajes de baneados. Cliente sin cambios. `/s2s/room/{id}/members`, `/s2s/room/{moderate,kicked}`.
 - **Pendiente:** F4 (salas privadas remotas: cablear el join privado por el `server_url` de la invitación; la infra de relay opaco ya lo soporta).
 
