@@ -29,6 +29,17 @@ type FedRoom struct {
 	ServerURL   string `json:"server_url,omitempty"`
 }
 
+// RoomRelayMsg is a room message relayed between federated servers. Payload is
+// opaque (E2E ciphertext for private rooms; plaintext for public rooms).
+type RoomRelayMsg struct {
+	RoomID  string `json:"room_id"`
+	From    string `json:"from"`
+	Nonce   string `json:"nonce,omitempty"`
+	Payload string `json:"payload"`
+	Ts      int64  `json:"ts,omitempty"`
+	Origin  string `json:"origin,omitempty"` // relaying peer URL (echo suppression)
+}
+
 // RelayMsg is the envelope sent to a peer's /s2s/message endpoint.
 type RelayMsg struct {
 	Type    string `json:"type"`
@@ -199,12 +210,32 @@ func (c *Client) lookupPeer(peer *db.FederationPeer, userID string) (*FedUser, e
 
 // RelayMessage forwards an already-encrypted DM to the peer that hosts the recipient.
 func (c *Client) RelayMessage(peer *db.FederationPeer, msg *RelayMsg) error {
-	body, err := json.Marshal(msg)
+	return c.postJSON(peer, "/s2s/message", msg)
+}
+
+// SubscribeRoom tells the home peer that this server has a subscriber for a room.
+func (c *Client) SubscribeRoom(peer *db.FederationPeer, roomID, userID, myURL string) error {
+	return c.postJSON(peer, "/s2s/room/subscribe",
+		map[string]any{"room_id": roomID, "user_id": userID, "peer_url": myURL})
+}
+
+// UnsubscribeRoom drops this server's subscription for a room on the home peer.
+func (c *Client) UnsubscribeRoom(peer *db.FederationPeer, roomID, userID, myURL string) error {
+	return c.postJSON(peer, "/s2s/room/unsubscribe",
+		map[string]any{"room_id": roomID, "user_id": userID, "peer_url": myURL})
+}
+
+// RelayRoomMessage forwards a room message to a peer.
+func (c *Client) RelayRoomMessage(peer *db.FederationPeer, msg *RoomRelayMsg) error {
+	return c.postJSON(peer, "/s2s/room/message", msg)
+}
+
+func (c *Client) postJSON(peer *db.FederationPeer, path string, v any) error {
+	body, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequest("POST", peer.URL+"/s2s/message", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", peer.URL+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -218,7 +249,7 @@ func (c *Client) RelayMessage(peer *db.FederationPeer, msg *RelayMsg) error {
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("relay to %s failed: status %d", peer.URL, resp.StatusCode)
+		return fmt.Errorf("s2s %s to %s failed: status %d", path, peer.URL, resp.StatusCode)
 	}
 	return nil
 }

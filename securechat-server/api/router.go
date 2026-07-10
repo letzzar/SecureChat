@@ -79,6 +79,12 @@ func NewRouter(cfg *config.Config, database *sql.DB, hub *ws.Hub, sfuInst *sfu.S
 		handlers.S2SRelayMessage(cfg, database, hub))
 	mux.HandleFunc("GET /s2s/rooms/public",
 		handlers.S2SSearchPublicRooms(cfg, database))
+	mux.HandleFunc("POST /s2s/room/subscribe",
+		handlers.S2SRoomSubscribe(cfg, database, hub))
+	mux.HandleFunc("POST /s2s/room/unsubscribe",
+		handlers.S2SRoomUnsubscribe(cfg, database, hub))
+	mux.HandleFunc("POST /s2s/room/message",
+		handlers.S2SRoomMessage(cfg, database, hub, fedClient))
 
 	return mux
 }

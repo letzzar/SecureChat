@@ -343,6 +343,22 @@ func (c *Client) handleRoomJoin(msg *IncomingMessage) {
 		c.sendError("invalid_room_join", "room_id required")
 		return
 	}
+
+	// Remote room hosted on a federated peer (Phase 2).
+	selfURL := c.cfg.Federation.PublicURL
+	if msg.Home != "" && msg.Home != selfURL {
+		peer := c.peerByURL(msg.Home)
+		if peer == nil {
+			c.sendError("unknown_home", "This server is not federated with the room's host")
+			return
+		}
+		c.hub.SetRemoteRoom(msg.RoomID, msg.Home)
+		c.hub.JoinRoom(msg.RoomID, c) // local subscription for fan-back delivery
+		go c.fed.SubscribeRoom(peer, msg.RoomID, c.userID, selfURL)
+		c.send <- &OutgoingMessage{Type: "room_joined", RoomID: msg.RoomID}
+		return
+	}
+
 	exists, err := db.RoomExists(c.database, msg.RoomID)
 	if err != nil || !exists {
 		c.sendError("room_not_found", "Room does not exist")
@@ -360,6 +376,11 @@ func (c *Client) handleRoomLeave(msg *IncomingMessage) {
 	if msg.RoomID == "" {
 		return
 	}
+	if home := c.hub.RemoteRoomHome(msg.RoomID); home != "" {
+		if peer := c.peerByURL(home); peer != nil {
+			go c.fed.UnsubscribeRoom(peer, msg.RoomID, c.userID, c.cfg.Federation.PublicURL)
+		}
+	}
 	c.hub.LeaveRoom(msg.RoomID, c)
 	c.send <- &OutgoingMessage{Type: "room_left", RoomID: msg.RoomID}
 }
@@ -370,7 +391,19 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 		return
 	}
 
-	// Only relay to rooms that actually exist; content stays opaque.
+	// Remote room — relay to the home server; local subscribers get the message
+	// when the home fans it back. Content stays opaque.
+	if home := c.hub.RemoteRoomHome(msg.RoomID); home != "" {
+		if peer := c.peerByURL(home); peer != nil && c.fed != nil {
+			go c.fed.RelayRoomMessage(peer, &federation.RoomRelayMsg{
+				RoomID: msg.RoomID, From: c.userID, Nonce: msg.Nonce,
+				Payload: msg.Payload, Ts: msg.Ts,
+			})
+		}
+		return
+	}
+
+	// Local room — must exist; content stays opaque.
 	exists, err := db.RoomExists(c.database, msg.RoomID)
 	if err != nil || !exists {
 		c.sendError("room_not_found", "Room does not exist")
@@ -390,6 +423,42 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 		Ts:      msg.Ts,
 	}
 	c.hub.BroadcastRoom(msg.RoomID, c, out)
+	c.fanRoomToPeers(msg.RoomID, c.userID, msg.Nonce, msg.Payload, msg.Ts)
+}
+
+// peerByURL finds a federated peer by URL.
+func (c *Client) peerByURL(url string) *db.FederationPeer {
+	peers, _ := db.GetFederationPeers(c.database)
+	for _, p := range peers {
+		if p.URL == url {
+			return p
+		}
+	}
+	return nil
+}
+
+// fanRoomToPeers (home side) relays a local room message to subscribed peers.
+func (c *Client) fanRoomToPeers(roomID, from, nonce, payload string, ts int64) {
+	if c.fed == nil {
+		return
+	}
+	peerURLs := c.hub.RoomPeers(roomID)
+	if len(peerURLs) == 0 {
+		return
+	}
+	peers, _ := db.GetFederationPeers(c.database)
+	byURL := make(map[string]*db.FederationPeer, len(peers))
+	for _, p := range peers {
+		byURL[p.URL] = p
+	}
+	for _, u := range peerURLs {
+		if p := byURL[u]; p != nil {
+			go c.fed.RelayRoomMessage(p, &federation.RoomRelayMsg{
+				RoomID: roomID, From: from, Nonce: nonce, Payload: payload, Ts: ts,
+				Origin: c.cfg.Federation.PublicURL,
+			})
+		}
+	}
 }
 
 func (c *Client) handleVoiceJoin(msg *IncomingMessage) {

@@ -7,12 +7,86 @@ type Hub struct {
 	mu      sync.RWMutex
 	clients map[string]*Client            // user_id → client
 	rooms   map[string]map[string]*Client // room_id → user_id → client
+
+	// Federation (Phase 2):
+	// remoteRooms: rooms hosted on a peer that local clients subscribe to.
+	remoteRooms map[string]string // room_id → home server URL
+	// roomPeers: on the HOME server, peers that currently have subscribers.
+	roomPeers map[string]map[string]bool // room_id → set(peer URL)
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[string]*Client),
-		rooms:   make(map[string]map[string]*Client),
+		clients:     make(map[string]*Client),
+		rooms:       make(map[string]map[string]*Client),
+		remoteRooms: make(map[string]string),
+		roomPeers:   make(map[string]map[string]bool),
+	}
+}
+
+// SetRemoteRoom records that roomID is hosted on homeURL (a federated peer).
+func (h *Hub) SetRemoteRoom(roomID, homeURL string) {
+	h.mu.Lock()
+	h.remoteRooms[roomID] = homeURL
+	h.mu.Unlock()
+}
+
+// RemoteRoomHome returns the home URL if roomID is a remote room, else "".
+func (h *Hub) RemoteRoomHome(roomID string) string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.remoteRooms[roomID]
+}
+
+// AddRoomPeer (home side) records that peerURL has subscribers for roomID.
+func (h *Hub) AddRoomPeer(roomID, peerURL string) {
+	h.mu.Lock()
+	if h.roomPeers[roomID] == nil {
+		h.roomPeers[roomID] = make(map[string]bool)
+	}
+	h.roomPeers[roomID][peerURL] = true
+	h.mu.Unlock()
+}
+
+// RemoveRoomPeer (home side) drops a peer's subscription for roomID.
+func (h *Hub) RemoveRoomPeer(roomID, peerURL string) {
+	h.mu.Lock()
+	if peers, ok := h.roomPeers[roomID]; ok {
+		delete(peers, peerURL)
+		if len(peers) == 0 {
+			delete(h.roomPeers, roomID)
+		}
+	}
+	h.mu.Unlock()
+}
+
+// RoomPeers returns the peer URLs subscribed to roomID (home side).
+func (h *Hub) RoomPeers(roomID string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]string, 0, len(h.roomPeers[roomID]))
+	for url := range h.roomPeers[roomID] {
+		out = append(out, url)
+	}
+	return out
+}
+
+// BroadcastRoomByUser delivers msg to local room subscribers except the user
+// exceptUserID (echo suppression when the sender lives on another server).
+func (h *Hub) BroadcastRoomByUser(roomID, exceptUserID string, msg *OutgoingMessage) {
+	h.mu.RLock()
+	members := make([]*Client, 0, len(h.rooms[roomID]))
+	for uid, c := range h.rooms[roomID] {
+		if uid != exceptUserID {
+			members = append(members, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range members {
+		select {
+		case c.send <- msg:
+		default:
+		}
 	}
 }
 

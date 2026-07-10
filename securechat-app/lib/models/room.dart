@@ -3,22 +3,30 @@ class JoinedRoom {
   final String roomName;
   final String saltHex;
   final bool isPublic; // public rooms are server-visible (not E2E)
+  final String homeUrl; // federated host URL when the room lives on another server
 
   const JoinedRoom({
     required this.roomId,
     required this.roomName,
     required this.saltHex,
     this.isPublic = false,
+    this.homeUrl = '',
   });
 
-  Map<String, dynamic> toJson() =>
-      {'roomId': roomId, 'roomName': roomName, 'saltHex': saltHex, 'isPublic': isPublic};
+  Map<String, dynamic> toJson() => {
+        'roomId': roomId,
+        'roomName': roomName,
+        'saltHex': saltHex,
+        'isPublic': isPublic,
+        'homeUrl': homeUrl,
+      };
 
   static JoinedRoom fromJson(Map<String, dynamic> j) => JoinedRoom(
         roomId: j['roomId'] as String,
         roomName: j['roomName'] as String,
         saltHex: j['saltHex'] as String? ?? '',
         isPublic: j['isPublic'] as bool? ?? false,
+        homeUrl: j['homeUrl'] as String? ?? '',
       );
 }
 

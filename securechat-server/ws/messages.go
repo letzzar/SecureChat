@@ -15,6 +15,9 @@ type IncomingMessage struct {
 
 	// room_join / room_leave / room_msg
 	RoomID string `json:"room_id,omitempty"`
+	// home = the federated server URL that hosts this room (for rooms not local
+	// to this server). Empty = local room.
+	Home string `json:"home,omitempty"`
 
 	// voice signaling
 	SDP       string `json:"sdp,omitempty"`

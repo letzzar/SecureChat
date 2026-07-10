@@ -90,18 +90,25 @@ class RoomsNotifier extends Notifier<RoomsState> {
   }
 
   /// Join a public room (server-visible, not E2E — no password/key).
+  /// [homeUrl] is non-empty when the room lives on a federated peer.
   void joinPublicRoom({
     required String roomId,
     required String roomName,
     required WsClient ws,
+    String homeUrl = '',
   }) {
     state = state.withRoom(JoinedRoom(
       roomId: roomId,
       roomName: roomName,
       saltHex: '',
       isPublic: true,
+      homeUrl: homeUrl,
     ));
-    ws.send({'type': 'room_join', 'room_id': roomId});
+    ws.send({
+      'type': 'room_join',
+      'room_id': roomId,
+      if (homeUrl.isNotEmpty) 'home': homeUrl,
+    });
   }
 
   /// Called when an admin kicked/banned us from a room.
@@ -114,7 +121,11 @@ class RoomsNotifier extends Notifier<RoomsState> {
   /// in memory, so no password re-entry is needed.
   void resendJoins(WsClient ws) {
     for (final room in state.joined) {
-      ws.send({'type': 'room_join', 'room_id': room.roomId});
+      ws.send({
+        'type': 'room_join',
+        'room_id': room.roomId,
+        if (room.homeUrl.isNotEmpty) 'home': room.homeUrl,
+      });
     }
   }
 

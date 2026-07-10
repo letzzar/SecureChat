@@ -9,6 +9,7 @@ import (
 
 	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
+	"github.com/securechat/server/federation"
 	"github.com/securechat/server/ws"
 )
 
@@ -215,6 +216,112 @@ func S2SSearchPublicRooms(cfg *config.Config, database *sql.DB) http.HandlerFunc
 			})
 		}
 		writeJSON(w, http.StatusOK, out)
+	})
+}
+
+// ── S2S: room relay (Phase 2) ────────────────────────────────────────────────
+
+type roomSubReq struct {
+	RoomID  string `json:"room_id"`
+	UserID  string `json:"user_id"`
+	PeerURL string `json:"peer_url"`
+}
+
+// S2SRoomSubscribe registers that a peer has a subscriber for one of our rooms.
+// For public rooms it enforces bans and records membership.
+func S2SRoomSubscribe(cfg *config.Config, database *sql.DB, hub *ws.Hub) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		var req roomSubReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RoomID == "" || req.PeerURL == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "room_id and peer_url required")
+			return
+		}
+		room, _ := db.GetRoom(database, req.RoomID)
+		if room == nil {
+			writeError(w, http.StatusNotFound, "not_found", "Room not found")
+			return
+		}
+		if req.UserID != "" {
+			if banned, _ := db.IsRoomBanned(database, req.RoomID, req.UserID); banned {
+				writeError(w, http.StatusForbidden, "banned", "User is banned")
+				return
+			}
+			if room.IsPublic {
+				_ = db.AddRoomMember(database, req.RoomID, req.UserID)
+			}
+		}
+		hub.AddRoomPeer(req.RoomID, req.PeerURL)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+}
+
+// S2SRoomUnsubscribe drops a peer's subscription for one of our rooms.
+func S2SRoomUnsubscribe(cfg *config.Config, database *sql.DB, hub *ws.Hub) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		var req roomSubReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RoomID == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "room_id required")
+			return
+		}
+		if req.PeerURL != "" {
+			hub.RemoveRoomPeer(req.RoomID, req.PeerURL)
+		}
+		if req.UserID != "" {
+			if room, _ := db.GetRoom(database, req.RoomID); room != nil && room.IsPublic {
+				_ = db.RemoveRoomMember(database, req.RoomID, req.UserID)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+}
+
+// S2SRoomMessage delivers a room message from a peer to our local subscribers.
+// If we host the room, we also fan it out to the other subscribed peers.
+func S2SRoomMessage(cfg *config.Config, database *sql.DB, hub *ws.Hub, fedClient *federation.Client) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		var m federation.RoomRelayMsg
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil || m.RoomID == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "room_id required")
+			return
+		}
+
+		out := &ws.OutgoingMessage{
+			Type:    "room_msg",
+			From:    m.From,
+			RoomID:  m.RoomID,
+			Nonce:   m.Nonce,
+			Payload: m.Payload,
+			Ts:      m.Ts,
+		}
+		// Deliver to local subscribers (except the original sender — echo).
+		hub.BroadcastRoomByUser(m.RoomID, m.From, out)
+
+		// If we are the room's home, fan out to the other subscribed peers.
+		if exists, _ := db.RoomExists(database, m.RoomID); exists {
+			subPeers := hub.RoomPeers(m.RoomID)
+			if len(subPeers) > 0 && fedClient != nil {
+				peers, _ := db.GetFederationPeers(database)
+				byURL := make(map[string]*db.FederationPeer, len(peers))
+				for _, p := range peers {
+					byURL[p.URL] = p
+				}
+				for _, purl := range subPeers {
+					if purl == m.Origin {
+						continue
+					}
+					p := byURL[purl]
+					if p == nil {
+						continue
+					}
+					relay := &federation.RoomRelayMsg{
+						RoomID: m.RoomID, From: m.From, Nonce: m.Nonce,
+						Payload: m.Payload, Ts: m.Ts, Origin: cfg.Federation.PublicURL,
+					}
+					go fedClient.RelayRoomMessage(p, relay)
+				}
+			}
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
 }
 
