@@ -352,9 +352,15 @@ func (c *Client) handleRoomJoin(msg *IncomingMessage) {
 			c.sendError("unknown_home", "This server is not federated with the room's host")
 			return
 		}
-		c.hub.SetRemoteRoom(msg.RoomID, msg.Home)
+		c.hub.SetRemoteRoom(msg.RoomID, msg.Home, msg.Private)
 		c.hub.JoinRoom(msg.RoomID, c) // local subscription for fan-back delivery
-		go c.fed.SubscribeRoom(peer, msg.RoomID, c.userID, selfURL)
+		// For private rooms, do not reveal our identity to the host; the sender
+		// travels inside the ciphertext. Public rooms track membership by user.
+		subUser := c.userID
+		if msg.Private {
+			subUser = ""
+		}
+		go c.fed.SubscribeRoom(peer, msg.RoomID, subUser, selfURL)
 		c.send <- &OutgoingMessage{Type: "room_joined", RoomID: msg.RoomID}
 		return
 	}
@@ -378,7 +384,11 @@ func (c *Client) handleRoomLeave(msg *IncomingMessage) {
 	}
 	if home := c.hub.RemoteRoomHome(msg.RoomID); home != "" {
 		if peer := c.peerByURL(home); peer != nil {
-			go c.fed.UnsubscribeRoom(peer, msg.RoomID, c.userID, c.cfg.Federation.PublicURL)
+			subUser := c.userID
+			if c.hub.IsRemoteRoomPrivate(msg.RoomID) {
+				subUser = "" // stayed anonymous to the host; unsubscribe likewise
+			}
+			go c.fed.UnsubscribeRoom(peer, msg.RoomID, subUser, c.cfg.Federation.PublicURL)
 		}
 	}
 	c.hub.LeaveRoom(msg.RoomID, c)
@@ -394,18 +404,32 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 	// Remote room — relay to the home server; local subscribers get the message
 	// when the home fans it back. Content stays opaque.
 	if home := c.hub.RemoteRoomHome(msg.RoomID); home != "" {
+		// Private room: sender lives inside the ciphertext, so the host only
+		// ever sees room_id + opaque payload — never who is talking.
+		from := c.userID
+		if c.hub.IsRemoteRoomPrivate(msg.RoomID) {
+			from = ""
+		}
+		// Deliver to our own local subscribers now (except the sender). We tag the
+		// relay with our URL as Origin so the home does not fan it back to us,
+		// which would duplicate the message on this server.
+		selfURL := c.cfg.Federation.PublicURL
+		c.hub.BroadcastRoom(msg.RoomID, c, &OutgoingMessage{
+			Type: "room_msg", From: from, RoomID: msg.RoomID,
+			Nonce: msg.Nonce, Payload: msg.Payload, Ts: msg.Ts,
+		})
 		if peer := c.peerByURL(home); peer != nil && c.fed != nil {
 			go c.fed.RelayRoomMessage(peer, &federation.RoomRelayMsg{
-				RoomID: msg.RoomID, From: c.userID, Nonce: msg.Nonce,
-				Payload: msg.Payload, Ts: msg.Ts,
+				RoomID: msg.RoomID, From: from, Nonce: msg.Nonce,
+				Payload: msg.Payload, Ts: msg.Ts, Origin: selfURL,
 			})
 		}
 		return
 	}
 
 	// Local room — must exist; content stays opaque.
-	exists, err := db.RoomExists(c.database, msg.RoomID)
-	if err != nil || !exists {
+	room, err := db.GetRoom(c.database, msg.RoomID)
+	if err != nil || room == nil {
 		c.sendError("room_not_found", "Room does not exist")
 		return
 	}
@@ -423,7 +447,13 @@ func (c *Client) handleRoomMsg(msg *IncomingMessage) {
 		Ts:      msg.Ts,
 	}
 	c.hub.BroadcastRoom(msg.RoomID, c, out)
-	c.fanRoomToPeers(msg.RoomID, c.userID, msg.Nonce, msg.Payload, msg.Ts)
+	// When fanning to federated peers, strip the sender for private rooms so no
+	// remote server learns who is talking (sender is inside the ciphertext).
+	fanFrom := c.userID
+	if !room.IsPublic {
+		fanFrom = ""
+	}
+	c.fanRoomToPeers(msg.RoomID, fanFrom, msg.Nonce, msg.Payload, msg.Ts)
 }
 
 // peerByURL finds a federated peer by URL.

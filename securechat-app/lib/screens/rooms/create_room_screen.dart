@@ -71,11 +71,14 @@ class _CreateRoomScreenState extends ConsumerState<CreateRoomScreen> {
         ws: ws,
       );
 
+      final homeUrl = ref.read(sessionProvider).identity?.serverUrl ?? '';
+
       setState(() {
         _invite = _RoomInvite(
           roomId: derived.roomId,
           roomName: _nameCtrl.text.trim(),
           saltHex: saltHex,
+          serverUrl: homeUrl,
         );
         _loading = false;
       });
@@ -175,16 +178,19 @@ class _RoomInvite {
   final String roomId;
   final String roomName;
   final String saltHex;
+  final String serverUrl; // home server that hosts this room
   const _RoomInvite({
     required this.roomId,
     required this.roomName,
     required this.saltHex,
+    required this.serverUrl,
   });
 
   String toJson() => jsonEncode({
     'room_id': roomId,
     'room_name': roomName,
     'salt': saltHex,
+    'server_url': serverUrl,
   });
 }
 

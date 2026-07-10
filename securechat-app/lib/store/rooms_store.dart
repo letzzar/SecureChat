@@ -64,12 +64,17 @@ class RoomsNotifier extends Notifier<RoomsState> {
   }
 
   /// Derive key, subscribe to WS, update state. Throws on wrong password.
+  /// [homeUrl] is non-empty when the private room is hosted on a federated
+  /// peer; the join is then routed through the active server's S2S relay. The
+  /// room key stays local and the sender travels inside the ciphertext, so the
+  /// host only ever sees room_id + opaque payload.
   Future<void> joinRoom({
     required String roomId,
     required String roomName,
     required String saltHex,
     required String password,
     required WsClient ws,
+    String homeUrl = '',
   }) async {
     final saltBytes = hexToBytes(saltHex);
     final derived = await deriveRoomKey(password, saltBytes);
@@ -84,9 +89,15 @@ class RoomsNotifier extends Notifier<RoomsState> {
       roomId: roomId,
       roomName: roomName,
       saltHex: saltHex,
+      homeUrl: homeUrl,
     ));
 
-    ws.send({'type': 'room_join', 'room_id': roomId});
+    ws.send({
+      'type': 'room_join',
+      'room_id': roomId,
+      if (homeUrl.isNotEmpty) 'home': homeUrl,
+      if (homeUrl.isNotEmpty) 'private': true,
+    });
   }
 
   /// Join a public room (server-visible, not E2E — no password/key).
@@ -125,6 +136,7 @@ class RoomsNotifier extends Notifier<RoomsState> {
         'type': 'room_join',
         'room_id': room.roomId,
         if (room.homeUrl.isNotEmpty) 'home': room.homeUrl,
+        if (room.homeUrl.isNotEmpty && !room.isPublic) 'private': true,
       });
     }
   }
@@ -150,8 +162,11 @@ class RoomsNotifier extends Notifier<RoomsState> {
     final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
     if (key != null) {
-      // Private room — E2E with the room key.
-      final encrypted = await encryptRoomMessage(text, key);
+      // Private room — E2E with the room key. The sender id travels inside the
+      // ciphertext so federated hosts (which lack the key) never learn who is
+      // talking; the outer `from` is stripped when the message is relayed.
+      final inner = jsonEncode({'v': 1, 'from': myUserId, 'text': text});
+      final encrypted = await encryptRoomMessage(inner, key);
       ws.send({'type': 'room_msg', 'room_id': roomId, 'nonce': 'enc', 'payload': encrypted, 'ts': ts});
     } else if (isPublic) {
       // Public room — plaintext (base64), server-visible.
@@ -255,11 +270,48 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
 
   // Regular text message
   String text;
+  var senderId = fromId;
   if (key != null) {
+    String decrypted;
     try {
-      text = await decryptRoomMessage(payload, key);
+      decrypted = await decryptRoomMessage(payload, key);
     } catch (_) {
+      decrypted = '';
       text = '[decryption failed]';
+    }
+    // New format: {v:1, from, text}. The sender inside the ciphertext is the
+    // source of truth (the outer `from` is empty for federated private rooms).
+    Map<String, dynamic>? inner;
+    if (decrypted.isNotEmpty) {
+      try {
+        final m = jsonDecode(decrypted);
+        if (m is Map<String, dynamic> && m['v'] == 1 && m.containsKey('text')) {
+          inner = m;
+        }
+      } catch (_) {}
+    }
+    if (inner != null) {
+      text = inner['text'] as String? ?? '';
+      final innerFrom = inner['from'] as String? ?? '';
+      if (innerFrom.isNotEmpty) senderId = innerFrom;
+    } else if (decrypted.isNotEmpty) {
+      text = decrypted; // legacy plain-text format
+    } else {
+      text = '[decryption failed]';
+    }
+
+    // The outer `from` was empty for a federated private room; resolve the
+    // display name for the real sender we just recovered from the ciphertext.
+    if (senderId.isNotEmpty && senderId != myUserId) {
+      final knownPeers = ref.read(knownPeersProvider);
+      if (!knownPeers.containsKey(senderId)) {
+        try {
+          final data = await ref.read(apiClientProvider)?.getUser(senderId);
+          if (data != null) {
+            ref.read(knownPeersProvider.notifier).update((s) => {...s, senderId: data});
+          }
+        } catch (_) {}
+      }
     }
   } else {
     // Public room — plaintext (base64).
@@ -273,13 +325,13 @@ Future<void> dispatchRoomMsg(Map<String, dynamic> msg, WidgetRef ref) async {
   ref.read(roomsProvider.notifier).addIncomingMessage(
     roomId,
     RoomMessage(
-      id: '${fromId}_$ts',
-      fromUserId: fromId,
+      id: '${senderId}_$ts',
+      fromUserId: senderId,
       text: text,
       timestamp: ts > 0
           ? DateTime.fromMillisecondsSinceEpoch(ts * 1000)
           : DateTime.now(),
-      isOutgoing: fromId == myUserId,
+      isOutgoing: senderId == myUserId,
     ),
   );
 }

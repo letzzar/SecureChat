@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:securechat/store/app_state.dart';
 import 'package:securechat/store/messages_store.dart';
 import 'package:securechat/store/rooms_store.dart';
 
@@ -20,6 +21,7 @@ class _JoinRoomScreenState extends ConsumerState<JoinRoomScreen> {
   final _saltCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
 
+  String _homeUrl = ''; // home server from the invite (server_url)
   bool _loading = false;
 
   @override
@@ -40,6 +42,7 @@ class _JoinRoomScreenState extends ConsumerState<JoinRoomScreen> {
       _nameCtrl.text = json['room_name'] as String? ?? '';
       _roomIdCtrl.text = json['room_id'] as String? ?? '';
       _saltCtrl.text = json['salt'] as String? ?? '';
+      _homeUrl = json['server_url'] as String? ?? '';
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Details pasted')));
@@ -60,12 +63,19 @@ class _JoinRoomScreenState extends ConsumerState<JoinRoomScreen> {
       final ws = ref.read(wsClientProvider);
       if (ws == null) throw Exception('WebSocket not connected');
 
+      // If the invite names a home server different from the active one, the
+      // room is federated: route the join through the active server's S2S relay.
+      final active = ref.read(sessionProvider).identity?.serverUrl ?? '';
+      final home =
+          (_homeUrl.isNotEmpty && _homeUrl != active) ? _homeUrl : '';
+
       await ref.read(roomsProvider.notifier).joinRoom(
         roomId: _roomIdCtrl.text.trim(),
         roomName: _nameCtrl.text.trim(),
         saltHex: _saltCtrl.text.trim(),
         password: _passCtrl.text,
         ws: ws,
+        homeUrl: home,
       );
 
       if (mounted) Navigator.of(context).pop();

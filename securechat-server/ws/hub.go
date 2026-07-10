@@ -11,24 +11,38 @@ type Hub struct {
 	// Federation (Phase 2):
 	// remoteRooms: rooms hosted on a peer that local clients subscribe to.
 	remoteRooms map[string]string // room_id → home server URL
+	// remotePrivate: which of those remote rooms are private (E2E). For these
+	// the sender identity travels inside the ciphertext, so the outer `from`
+	// is stripped before relaying to the home (it never learns who is talking).
+	remotePrivate map[string]bool // room_id → private?
 	// roomPeers: on the HOME server, peers that currently have subscribers.
 	roomPeers map[string]map[string]bool // room_id → set(peer URL)
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		clients:     make(map[string]*Client),
-		rooms:       make(map[string]map[string]*Client),
-		remoteRooms: make(map[string]string),
-		roomPeers:   make(map[string]map[string]bool),
+		clients:       make(map[string]*Client),
+		rooms:         make(map[string]map[string]*Client),
+		remoteRooms:   make(map[string]string),
+		remotePrivate: make(map[string]bool),
+		roomPeers:     make(map[string]map[string]bool),
 	}
 }
 
 // SetRemoteRoom records that roomID is hosted on homeURL (a federated peer).
-func (h *Hub) SetRemoteRoom(roomID, homeURL string) {
+// private marks E2E rooms whose sender identity must stay inside the ciphertext.
+func (h *Hub) SetRemoteRoom(roomID, homeURL string, private bool) {
 	h.mu.Lock()
 	h.remoteRooms[roomID] = homeURL
+	h.remotePrivate[roomID] = private
 	h.mu.Unlock()
+}
+
+// IsRemoteRoomPrivate reports whether a remote room is private (E2E).
+func (h *Hub) IsRemoteRoomPrivate(roomID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.remotePrivate[roomID]
 }
 
 // RemoteRoomHome returns the home URL if roomID is a remote room, else "".

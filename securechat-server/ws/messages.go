@@ -18,6 +18,8 @@ type IncomingMessage struct {
 	// home = the federated server URL that hosts this room (for rooms not local
 	// to this server). Empty = local room.
 	Home string `json:"home,omitempty"`
+	// private = the remote room is E2E; keep the sender out of relayed metadata.
+	Private bool `json:"private,omitempty"`
 
 	// voice signaling
 	SDP       string `json:"sdp,omitempty"`
