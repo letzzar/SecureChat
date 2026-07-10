@@ -41,7 +41,7 @@ func NewRouter(cfg *config.Config, database *sql.DB, hub *ws.Hub, sfuInst *sfu.S
 	mux.HandleFunc("POST /api/v1/rooms/public",
 		handlers.AuthMiddleware(cfg, handlers.CreatePublicRoom(database)))
 	mux.HandleFunc("GET /api/v1/rooms/public",
-		handlers.AuthMiddleware(cfg, handlers.SearchPublicRooms(database)))
+		handlers.AuthMiddleware(cfg, handlers.SearchPublicRooms(cfg, fedClient, database)))
 	mux.HandleFunc("POST /api/v1/rooms/{room_id}/join",
 		handlers.AuthMiddleware(cfg, handlers.JoinPublicRoom(database)))
 	mux.HandleFunc("GET /api/v1/rooms/{room_id}/members",
@@ -77,6 +77,8 @@ func NewRouter(cfg *config.Config, database *sql.DB, hub *ws.Hub, sfuInst *sfu.S
 		handlers.S2SSearchUsers(cfg, database))
 	mux.HandleFunc("POST /s2s/message",
 		handlers.S2SRelayMessage(cfg, database, hub))
+	mux.HandleFunc("GET /s2s/rooms/public",
+		handlers.S2SSearchPublicRooms(cfg, database))
 
 	return mux
 }

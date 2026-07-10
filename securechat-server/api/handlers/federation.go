@@ -195,6 +195,29 @@ func S2SSearchUsers(cfg *config.Config, database *sql.DB) http.HandlerFunc {
 	})
 }
 
+// ── S2S: public rooms discovery ──────────────────────────────────────────────
+
+// S2SSearchPublicRooms advertises this server's public rooms to federated
+// peers. Private rooms are never listed here (privacy).
+func S2SSearchPublicRooms(cfg *config.Config, database *sql.DB) http.HandlerFunc {
+	return S2SMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		rooms, err := db.SearchPublicRooms(database, q, 50)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "db_error", "Database error")
+			return
+		}
+		out := make([]publicRoomResponse, 0, len(rooms))
+		for _, rm := range rooms {
+			out = append(out, publicRoomResponse{
+				RoomID: rm.RoomID, RoomName: rm.RoomName,
+				MemberCount: rm.MemberCount, IsPublic: true,
+			})
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+}
+
 // ── S2S: message relay ────────────────────────────────────────────────────────
 
 // S2SRelayMessage accepts an encrypted DM from a peer and delivers it locally.

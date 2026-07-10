@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/securechat/server/config"
 	"github.com/securechat/server/db"
+	"github.com/securechat/server/federation"
 )
 
 func randomRoomID() string {
@@ -24,6 +26,7 @@ type publicRoomResponse struct {
 	CreatedAt   int64  `json:"created_at,omitempty"`
 	MemberCount int    `json:"member_count"`
 	IsPublic    bool   `json:"is_public"`
+	ServerURL   string `json:"server_url,omitempty"` // non-empty = hosted on a federated peer
 }
 
 // CreatePublicRoom creates an open, server-visible room and makes the caller its
@@ -61,8 +64,10 @@ func CreatePublicRoom(database *sql.DB) http.HandlerFunc {
 	}
 }
 
-// SearchPublicRooms lists/searches public rooms (q optional).
-func SearchPublicRooms(database *sql.DB) http.HandlerFunc {
+// SearchPublicRooms lists/searches public rooms (q optional). In mesh mode it
+// also fans out to federated peers and includes their public rooms, tagged with
+// server_url.
+func SearchPublicRooms(cfg *config.Config, fedClient *federation.Client, database *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		rooms, err := db.SearchPublicRooms(database, q, 50)
@@ -77,6 +82,21 @@ func SearchPublicRooms(database *sql.DB) http.HandlerFunc {
 				CreatedAt: rm.CreatedAt, MemberCount: rm.MemberCount, IsPublic: true,
 			})
 		}
+
+		// Cross-server discovery: aggregate public rooms from federated peers.
+		if cfg.IsMesh() && fedClient != nil {
+			peers, _ := db.GetFederationPeers(database)
+			if len(peers) > 0 {
+				for _, fr := range fedClient.SearchPublicRooms(peers, q) {
+					out = append(out, publicRoomResponse{
+						RoomID: fr.RoomID, RoomName: fr.RoomName,
+						MemberCount: fr.MemberCount, IsPublic: true,
+						ServerURL: fr.ServerURL,
+					})
+				}
+			}
+		}
+
 		writeJSON(w, http.StatusOK, out)
 	}
 }

@@ -46,6 +46,23 @@ class _PublicRoomsScreenState extends ConsumerState<PublicRoomsScreen> {
     }
   }
 
+  void _remoteRoomInfo(String serverUrl) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Room on a federated server'),
+        content: Text(
+          'This room lives on $serverUrl. Joining rooms across servers is coming '
+          'in a future update.\n\nYou can join it today by adding that server in '
+          'Profile → Servers → Add server and switching to it.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _join(String roomId, String roomName) async {
     final api = ref.read(apiClientProvider);
     final ws = ref.read(wsClientProvider);
@@ -139,22 +156,42 @@ class _PublicRoomsScreenState extends ConsumerState<PublicRoomsScreen> {
                       final id = r['room_id'] as String;
                       final name = r['room_name'] as String? ?? '';
                       final count = r['member_count'] as int? ?? 0;
+                      final serverUrl = r['server_url'] as String? ?? '';
+                      final isRemote = serverUrl.isNotEmpty;
                       final joined = joinedIds.contains(id);
                       return ListTile(
                         leading: CircleAvatar(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '#')),
-                        title: Text(name),
-                        subtitle: Text('$count member${count == 1 ? '' : 's'}'),
-                        trailing: joined
-                            ? const Text('Joined', style: TextStyle(color: Colors.grey))
-                            : FilledButton(onPressed: () => _join(id, name), child: const Text('Join')),
-                        onTap: joined
-                            ? () {
-                                Navigator.of(context).pop();
-                                Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => RoomChatScreen(roomId: id, roomName: name, isPublic: true),
-                                ));
-                              }
-                            : () => _join(id, name),
+                        title: Row(
+                          children: [
+                            Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
+                            if (isRemote) ...[
+                              const SizedBox(width: 6),
+                              Tooltip(
+                                message: 'On $serverUrl',
+                                child: Icon(Icons.hub_outlined,
+                                    size: 14, color: Theme.of(context).colorScheme.primary),
+                              ),
+                            ],
+                          ],
+                        ),
+                        subtitle: Text(isRemote
+                            ? '$count member${count == 1 ? '' : 's'} · ${Uri.tryParse(serverUrl)?.host ?? serverUrl}'
+                            : '$count member${count == 1 ? '' : 's'}'),
+                        trailing: isRemote
+                            ? const Icon(Icons.chevron_right, color: Colors.grey)
+                            : joined
+                                ? const Text('Joined', style: TextStyle(color: Colors.grey))
+                                : FilledButton(onPressed: () => _join(id, name), child: const Text('Join')),
+                        onTap: isRemote
+                            ? () => _remoteRoomInfo(serverUrl)
+                            : joined
+                                ? () {
+                                    Navigator.of(context).pop();
+                                    Navigator.of(context).push(MaterialPageRoute(
+                                      builder: (_) => RoomChatScreen(roomId: id, roomName: name, isPublic: true),
+                                    ));
+                                  }
+                                : () => _join(id, name),
                       );
                     },
                   ),

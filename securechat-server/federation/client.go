@@ -21,6 +21,14 @@ type FedUser struct {
 	ServerURL   string `json:"server_url,omitempty"`
 }
 
+// FedRoom is a public room advertised by a federated peer.
+type FedRoom struct {
+	RoomID      string `json:"room_id"`
+	RoomName    string `json:"room_name"`
+	MemberCount int    `json:"member_count"`
+	ServerURL   string `json:"server_url,omitempty"`
+}
+
 // RelayMsg is the envelope sent to a peer's /s2s/message endpoint.
 type RelayMsg struct {
 	Type    string `json:"type"`
@@ -95,6 +103,59 @@ func (c *Client) searchPeer(peer *db.FederationPeer, query string) ([]FedUser, e
 		users[i].ServerURL = peer.URL
 	}
 	return users, nil
+}
+
+// SearchPublicRooms fans out a public-room search to all peers concurrently and
+// aggregates results. Only public rooms are ever advertised — private rooms are
+// never listed cross-server.
+func (c *Client) SearchPublicRooms(peers []*db.FederationPeer, query string) []FedRoom {
+	ch := make(chan []FedRoom, len(peers))
+	for _, p := range peers {
+		go func(peer *db.FederationPeer) {
+			rooms, err := c.searchPeerRooms(peer, query)
+			if err != nil {
+				ch <- nil
+				return
+			}
+			ch <- rooms
+		}(p)
+	}
+
+	var all []FedRoom
+	for range peers {
+		if rooms := <-ch; len(rooms) > 0 {
+			all = append(all, rooms...)
+		}
+	}
+	return all
+}
+
+func (c *Client) searchPeerRooms(peer *db.FederationPeer, query string) ([]FedRoom, error) {
+	req, err := http.NewRequest("GET",
+		peer.URL+"/s2s/rooms/public?q="+url.QueryEscape(query), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Federation-Secret", peer.Secret)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("peer %s returned %d", peer.URL, resp.StatusCode)
+	}
+
+	var rooms []FedRoom
+	if err := json.NewDecoder(resp.Body).Decode(&rooms); err != nil {
+		return nil, err
+	}
+	for i := range rooms {
+		rooms[i].ServerURL = peer.URL
+	}
+	return rooms, nil
 }
 
 // LookupUser queries each peer until it finds the user. Returns the hosting peer and the user.
