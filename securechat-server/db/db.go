@@ -3,23 +3,110 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
 
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/mutecomm/go-sqlcipher/v4"
 )
 
-func Open(path string) (*sql.DB, error) {
-	database, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_foreign_keys=on")
+var registerEnc sync.Once
+
+// Open opens the SQLite database. When [key] is non-empty the database is
+// encrypted at rest with SQLCipher (AES-256); the key is supplied at startup
+// (SECURECHAT_DB_KEY) and never stored on disk. A pre-existing plaintext DB is
+// migrated to encrypted transparently (a .plaintext.bak is kept).
+func Open(path, key string) (*sql.DB, error) {
+	if key != "" {
+		esc := strings.ReplaceAll(key, "'", "''")
+		registerEnc.Do(func() {
+			sql.Register("sqlite3-enc", &sqlite3.SQLiteDriver{
+				ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+					// PRAGMA key MUST be the first statement on the connection,
+					// before any other pragma or query, or SQLCipher can't set up.
+					if _, err := conn.Exec(fmt.Sprintf("PRAGMA key = '%s';", esc), nil); err != nil {
+						return err
+					}
+					if _, err := conn.Exec("PRAGMA journal_mode=WAL;", nil); err != nil {
+						return err
+					}
+					_, err := conn.Exec("PRAGMA foreign_keys=ON;", nil)
+					return err
+				},
+			})
+		})
+		if err := ensureEncrypted(path, esc); err != nil {
+			return nil, err
+		}
+	}
+
+	var database *sql.DB
+	var err error
+	if key != "" {
+		database, err = sql.Open("sqlite3-enc", path) // pragmas applied in the hook
+	} else {
+		database, err = sql.Open("sqlite3", path+"?_journal_mode=WAL&_foreign_keys=on")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-
 	database.SetMaxOpenConns(1)
+
+	// Verify the key actually decrypts the database.
+	if key != "" {
+		if _, err := database.Exec("SELECT count(*) FROM sqlite_master"); err != nil {
+			database.Close()
+			return nil, fmt.Errorf("cannot open encrypted DB (wrong SECURECHAT_DB_KEY?): %w", err)
+		}
+	}
 
 	if err := migrate(database); err != nil {
 		database.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return database, nil
+}
+
+// ensureEncrypted migrates a pre-existing plaintext DB to an encrypted one.
+// escKey is the SQLCipher key with single quotes already escaped.
+func ensureEncrypted(path, escKey string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // fresh install — the encrypted DB is created on open
+	}
+
+	// Is the existing file plaintext? (Opening it without a key succeeds.)
+	pdb, err := sql.Open("sqlite3", path)
+	if err != nil {
+		return err
+	}
+	if _, err := pdb.Exec("SELECT count(*) FROM sqlite_master"); err != nil {
+		pdb.Close()
+		return nil // already encrypted (or unreadable) — leave it to the keyed open
+	}
+
+	// Plaintext → export into an encrypted copy, then swap files.
+	encPath := path + ".enc"
+	os.Remove(encPath)
+	escEnc := strings.ReplaceAll(encPath, "'", "''")
+	if _, err := pdb.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS enc KEY '%s';", escEnc, escKey)); err != nil {
+		pdb.Close()
+		return fmt.Errorf("db migrate attach: %w", err)
+	}
+	if _, err := pdb.Exec("SELECT sqlcipher_export('enc');"); err != nil {
+		pdb.Close()
+		return fmt.Errorf("db migrate export: %w", err)
+	}
+	pdb.Exec("DETACH DATABASE enc;")
+	pdb.Close()
+
+	// Keep the plaintext as a backup; swap in the encrypted file.
+	if err := os.Rename(path, path+".plaintext.bak"); err != nil {
+		return fmt.Errorf("db migrate backup: %w", err)
+	}
+	if err := os.Rename(encPath, path); err != nil {
+		return fmt.Errorf("db migrate swap: %w", err)
+	}
+	return nil
 }
 
 func migrate(db *sql.DB) error {

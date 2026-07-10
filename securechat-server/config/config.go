@@ -28,6 +28,9 @@ type ServerConfig struct {
 
 type DatabaseConfig struct {
 	Path string `toml:"path"`
+	// Key encrypts the database at rest (SQLCipher). Set via SECURECHAT_DB_KEY
+	// only — never store it in config.toml (that would defeat the purpose).
+	Key string `toml:"-"`
 }
 
 type LimitsConfig struct {
@@ -106,6 +109,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SECURECHAT_DB_PATH"); v != "" {
 		cfg.Database.Path = v
+	}
+	if v := os.Getenv("SECURECHAT_DB_KEY"); v != "" {
+		cfg.Database.Key = v
 	}
 	if v := os.Getenv("SECURECHAT_HOST"); v != "" {
 		cfg.Server.Host = v

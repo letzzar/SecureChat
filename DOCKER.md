@@ -94,6 +94,7 @@ Everything can be configured without a file (ideal for Docker). If you mount a
 | `SECURECHAT_PORT` | `8443` | Listen port. |
 | `SECURECHAT_HOST` | `0.0.0.0` | Listen interface. |
 | `SECURECHAT_DB_PATH` | `/data/data.db` | SQLite database path. |
+| `SECURECHAT_DB_KEY` | — | Encrypts the DB at rest (SQLCipher AES-256). If set, the DB file is illegible without it even if the disk is seized. Keep it **off** the data disk (Docker secret / systemd credential). **Losing it = unrecoverable DB.** A pre-existing plaintext DB is migrated automatically (a `.plaintext.bak` is kept). |
 | `SECURECHAT_TLS` | `false` | `true` for native TLS 1.3 (needs cert/key). |
 | `SECURECHAT_TLS_CERT` / `SECURECHAT_TLS_KEY` | — | Certificate and key paths (mount them under `/data`). |
 

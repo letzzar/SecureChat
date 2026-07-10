@@ -31,7 +31,10 @@ func main() {
 		log.Fatal("jwt.secret is unset or still the default placeholder — set a strong secret in config.toml")
 	}
 
-	database, err := db.Open(cfg.Database.Path)
+	if cfg.Database.Key == "" {
+		log.Printf("WARNING: SECURECHAT_DB_KEY not set — the database is NOT encrypted at rest.")
+	}
+	database, err := db.Open(cfg.Database.Path, cfg.Database.Key)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}

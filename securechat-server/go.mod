@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/mattn/go-sqlite3 v1.14.44
+	github.com/mutecomm/go-sqlcipher/v4 v4.4.2
 	github.com/pion/webrtc/v3 v3.3.6
 	golang.org/x/crypto v0.21.0
 )
