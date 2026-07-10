@@ -508,13 +508,21 @@ New-NetFirewallRule -DisplayName "SecureChat" -Direction Inbound `
 ## 9. Security Checklist
 
 - [ ] **Change `jwt.secret`** — never use the default. Generate with `openssl rand -hex 32`.
-- [ ] **Enable TLS** — either native (`tls = true`) or via nginx reverse proxy.
+- [ ] **Enable TLS** — either native (`tls = true`) or via nginx reverse proxy. With Let's Encrypt use `fullchain.pem` (not `cert.pem`) so Windows/BoringSSL clients verify the chain.
+- [ ] **Encrypt the DB at rest** — set `SECURECHAT_DB_KEY` (SQLCipher AES-256). Keep the key **off the data disk** (Docker secret / systemd credential). Losing it = unrecoverable DB. See [DOCKER.md](DOCKER.md).
+- [ ] **Delete the migration backup** — after enabling `SECURECHAT_DB_KEY` on an existing DB, `shred -u data.db.plaintext.bak` (it is the old unencrypted copy).
 - [ ] **Set `mode = "private"`** unless you intentionally want open registration.
 - [ ] **Change `federation.secret` and `federation.admin_token`** before enabling mesh mode.
 - [ ] **Restrict port 8080** in the firewall if using a reverse proxy (only localhost should reach it).
 - [ ] **Run as a non-root user** (Linux: the `securechat` system user from §7).
 - [ ] **Back up `data.db`** regularly — it contains all user registrations and offline messages.
 - [ ] **Monitor disk space** — SQLite grows with offline messages; they are purged after `offline_ttl_hours`.
+
+> **Rooms & privacy:** private rooms and DMs are end-to-end encrypted (the server
+> only relays opaque ciphertext). **Public rooms are server-visible by design**
+> (open join + moderation). In a federated mesh, public rooms are discoverable and
+> joinable across servers; private rooms are never advertised and are relayed
+> cross-server as opaque ciphertext (the host only ever sees `room_id` + blobs).
 
 ---
 
@@ -1070,13 +1078,21 @@ New-NetFirewallRule -DisplayName "SecureChat" -Direction Inbound `
 ## 9. Lista de Verificación de Seguridad
 
 - [ ] **Cambia `jwt.secret`** — nunca uses el valor por defecto. Genera con `openssl rand -hex 32`.
-- [ ] **Activa TLS** — ya sea nativo (`tls = true`) o mediante proxy inverso con nginx.
+- [ ] **Activa TLS** — nativo (`tls = true`) o proxy inverso con nginx. Con Let's Encrypt usa `fullchain.pem` (no `cert.pem`) para que los clientes Windows/BoringSSL verifiquen la cadena.
+- [ ] **Cifra la DB en reposo** — define `SECURECHAT_DB_KEY` (SQLCipher AES-256). Mantén la clave **fuera del disco de datos** (secreto de Docker / credencial de systemd). Perderla = DB irrecuperable. Ver [DOCKER.md](DOCKER.md).
+- [ ] **Borra el backup de migración** — tras activar `SECURECHAT_DB_KEY` sobre una DB existente, `shred -u data.db.plaintext.bak` (es la copia antigua sin cifrar).
 - [ ] **Usa `mode = "private"`** salvo que quieras registro abierto de forma intencionada.
 - [ ] **Cambia `federation.secret` y `federation.admin_token`** antes de activar el modo mesh.
 - [ ] **Restringe el puerto 8080** en el firewall si usas proxy inverso (solo localhost debe acceder).
 - [ ] **Ejecuta como usuario no-root** (Linux: el usuario de sistema `securechat` del §7).
 - [ ] **Haz copias de `data.db`** regularmente — contiene todos los registros de usuarios y mensajes offline.
 - [ ] **Vigila el espacio en disco** — SQLite crece con los mensajes offline; se purgan tras `offline_ttl_hours`.
+
+> **Salas y privacidad:** las salas privadas y los DMs son E2E (el servidor solo
+> reenvía ciphertext opaco). **Las salas públicas son visibles al servidor por
+> diseño** (unión abierta + moderación). En una malla federada, las públicas se
+> descubren y se unen entre servidores; las privadas nunca se anuncian y se
+> relayan cross-server como ciphertext opaco (el anfitrión solo ve `room_id` + blobs).
 
 ---
 

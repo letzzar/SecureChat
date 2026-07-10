@@ -9,6 +9,51 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ---
 
+## 2026-07-10 — Public rooms, room federation, encryption at rest
+
+### Added
+- **Public rooms (Telegram-style).** Open-join, discoverable, server-visible
+  rooms alongside the existing E2E private rooms.
+  - Server: `is_public` flag + `room_admins` (owner/admin) + `room_bans`
+    (temporary/permanent) tables; create/search/join, member list, and
+    moderation endpoints. The WebSocket rejects banned users and disconnects
+    kicked ones (`room_kicked`).
+  - **Moderation:** the creator is owner; admins can **kick**, **ban**
+    (1h/1d/7d/permanent) and **promote other admins**; only the owner demotes
+    admins; the owner cannot be moderated.
+  - Client: Rooms tab split into **Public Rooms** / **Private Rooms**; browse,
+    search, create and join public rooms; member list with admin actions.
+- **Room federation — phase 1 (discovery).** The public-room browser fans out to
+  federated peers and lists their public rooms too (tagged with `server_url`).
+  Private rooms are **never** advertised cross-server.
+- **Room federation — phase 2 (participation).** Rooms hosted on a federated peer
+  can be joined and used remotely. The home server stays authoritative and is the
+  fan-out hub; it keeps only an **in-memory** registry of which peers have
+  subscribers. Content is relayed **opaquely** (E2E ciphertext for private rooms,
+  plaintext for public) — nothing is stored or replicated cross-server.
+  New S2S endpoints: `/s2s/rooms/public`, `/s2s/room/{subscribe,unsubscribe,message}`.
+- **Encryption at rest (server).** `SECURECHAT_DB_KEY` encrypts the SQLite
+  database with **SQLCipher (AES-256)**. Without the key the DB file is illegible
+  even if the disk is seized; the key is supplied at startup and never written to
+  disk. A pre-existing plaintext DB is migrated automatically (keeps a
+  `.plaintext.bak` — delete it after verifying). Client storage was already
+  encrypted at rest (ChaCha20-Poly1305 + OS keystore).
+- **Client conveniences:** edit a server's address from Profile → Servers (http→https
+  without losing the identity); a **"Specify port"** toggle in setup (defaults to
+  8443, HTTPS by default); a **"Block messages from unknown people"** privacy toggle.
+
+### Changed
+- Server Docker image now builds on **Debian (glibc)** instead of Alpine —
+  go-sqlcipher's vendored SQLite does not compile against musl.
+- SQLite driver switched from `mattn/go-sqlite3` to `mutecomm/go-sqlcipher`.
+
+### Security notes
+- Public rooms are **server-visible by design** (open join + moderation); private
+  rooms and DMs remain end-to-end encrypted.
+- Losing `SECURECHAT_DB_KEY` makes the database **unrecoverable**.
+
+---
+
 ## 2026-07-08 — Encrypted local history + multi-server
 
 ### Added

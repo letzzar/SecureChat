@@ -1,6 +1,6 @@
 # SecureChat — Handoff de Sesión
 
-**Última actualización:** 2026-07-08 (persistencia cifrada + multi-servidor; seguridad + CI 7/7 + Release v0.5.0 + Docker multi-arch)
+**Última actualización:** 2026-07-10 (salas públicas + moderación, federación de salas F1/F2, cifrado en reposo del servidor SQLCipher)
 **Para retomar:** di "continua sesion" o "lee el SESSION_HANDOFF.md"
 
 > Este archivo es el nexo común Mac ↔ Windows. Actualizarlo al final de cada sesión.
@@ -27,6 +27,18 @@
 | 4h | Federación de servidores (4 modos: public/private/mesh_public/mesh_private) | ✅ Completo |
 | 5 | Endurecimiento de seguridad (auditoría §13) + CI + modernización deps | ✅ Completo |
 | 6 | Persistencia local cifrada (DMs + salas) + multi-servidor (identidad por servidor) | ✅ Completo |
+| 7 | Salas públicas (tipo Telegram) + moderación (kick/ban/admins) | ✅ Completo |
+| 8 | Federación de salas: F1 descubrimiento + F2 participación remota | ✅ (F3/F4 pendientes) |
+| 9 | Cifrado en reposo del servidor (SQLCipher AES-256, `SECURECHAT_DB_KEY`) | ✅ Completo |
+
+### Completado en sesión 2026-07-10
+
+- **Salas públicas** (server-visible, tipo Telegram) + privadas E2E como estaban. Moderación: owner + admins pueden kick, ban (1h/1d/7d/permanente) y nombrar admins; solo el owner degrada. Servidor: `is_public`, `room_admins`, `room_bans` + endpoints; cliente: pestañas Public/Private, browse/crear/unir, lista de miembros con acciones.
+- **Federación de salas F1 (descubrimiento):** el browser hace fan-out a peers; solo públicas se anuncian (privadas nunca). `/s2s/rooms/public`.
+- **Federación de salas F2 (participación remota):** origen autoritativo + fan-out; registro de peers-suscritos **solo en RAM**; relay **opaco** (ciphertext en privadas, texto en públicas), nada se almacena/replica. `/s2s/room/{subscribe,unsubscribe,message}`; cliente `JoinedRoom.homeUrl` + `home` en room_join.
+- **Cifrado en reposo del servidor:** `SECURECHAT_DB_KEY` → SQLCipher AES-256; migración automática de DB plana (deja `.plaintext.bak`, **hay que borrarlo**). Driver mattn→mutecomm/go-sqlcipher; Docker pasó a **Debian (glibc)** (musl no compila go-sqlcipher). Verificado: fichero sin cabecera SQLite, `sqlite3` plano no lo abre. **Perder la clave = DB irrecuperable.**
+- Cliente: editar servidor (http→https), toggle "Specify port" (8443 por defecto, https por defecto), toggle privacidad "Block unknown".
+- **Pendiente:** F3 (moderación de salas remotas) — en curso; F4 (salas privadas remotas: cablear join por `server_url` de la invitación, infra ya lista).
 
 ### Completado en sesión 2026-07-07 (seguridad + CI + deps)
 

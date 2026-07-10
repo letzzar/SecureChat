@@ -104,6 +104,49 @@ Simplest is to keep `SECURECHAT_TLS=false` and put a **reverse proxy** (nginx /
 Traefik / Caddy) in front to terminate HTTPS. For native TLS, mount the
 certificate and key under `/data` and set `SECURECHAT_TLS=true` with the paths.
 
+> If you use a Let's Encrypt cert, point `SECURECHAT_TLS_CERT` to **`fullchain.pem`**
+> (leaf + intermediate), not `cert.pem`, or clients using BoringSSL (Windows)
+> fail with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`.
+
+### Encryption at rest (recommended)
+
+Set `SECURECHAT_DB_KEY` to encrypt the database with **SQLCipher (AES-256)**. If
+the disk is seized, the DB is illegible without the key. The key is read at
+startup and never written to disk.
+
+```bash
+# Generate once and store it OUTSIDE the data disk (Docker secret / password manager)
+openssl rand -hex 32
+```
+
+```yaml
+services:
+  securechat-server:
+    image: ghcr.io/letzzar/securechat-server:latest
+    restart: unless-stopped
+    env_file: [.env]                 # contains SECURECHAT_JWT_SECRET, SECURECHAT_DB_KEY
+    ports: ["8443:8443"]
+    volumes: ["./data:/data"]
+```
+
+> ⚠️ **Losing `SECURECHAT_DB_KEY` makes the DB unrecoverable.**
+> On first start with a key, a pre-existing plaintext DB is migrated to encrypted
+> and a `data.db.plaintext.bak` is left behind — **securely delete it**
+> (`shred -u data/data.db.plaintext.bak`) or the plaintext copy remains readable.
+
+### Recommended production run
+
+```bash
+docker run -d --name securechat-server \
+  -e SECURECHAT_JWT_SECRET="$(openssl rand -hex 32)" \
+  -e SECURECHAT_DB_KEY="$(openssl rand -hex 32)" \
+  -e SECURECHAT_TLS=true \
+  -e SECURECHAT_TLS_CERT=/data/fullchain.pem \
+  -e SECURECHAT_TLS_KEY=/data/privkey.pem \
+  -p 8443:8443 -v "$PWD/data:/data" \
+  ghcr.io/letzzar/securechat-server:latest
+```
+
 ## Publishing the image
 
 - **GHCR**: automatic on every push to `main` touching `securechat-server/**`,
@@ -220,6 +263,7 @@ Todo se puede configurar sin fichero (idóneo para Docker). Si montas un
 | `SECURECHAT_PORT` | `8443` | Puerto de escucha. |
 | `SECURECHAT_HOST` | `0.0.0.0` | Interfaz de escucha. |
 | `SECURECHAT_DB_PATH` | `/data/data.db` | Ruta de la base SQLite. |
+| `SECURECHAT_DB_KEY` | — | Cifra la DB en reposo (SQLCipher AES-256). Si se define, el fichero es ilegible sin ella aunque requisen el disco. Mantenla **fuera** del disco de datos. **Perderla = DB irrecuperable.** Una DB plana existente se migra sola (deja un `.plaintext.bak`). |
 | `SECURECHAT_TLS` | `false` | `true` para TLS 1.3 nativo (requiere cert/key). |
 | `SECURECHAT_TLS_CERT` / `SECURECHAT_TLS_KEY` | — | Rutas del certificado y la clave (móntalos en `/data`). |
 
@@ -228,6 +272,39 @@ Todo se puede configurar sin fichero (idóneo para Docker). Si montas un
 Lo más sencillo es dejar `SECURECHAT_TLS=false` y poner un **proxy inverso**
 (nginx / Traefik / Caddy) delante que termine HTTPS. Para TLS nativo, monta el
 certificado y la clave en `/data` y define `SECURECHAT_TLS=true` con las rutas.
+
+> Con Let's Encrypt, apunta `SECURECHAT_TLS_CERT` a **`fullchain.pem`** (hoja +
+> intermedio), no a `cert.pem`, o los clientes con BoringSSL (Windows) fallan con
+> `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`.
+
+#### Cifrado en reposo (recomendado)
+
+Define `SECURECHAT_DB_KEY` para cifrar la base con **SQLCipher (AES-256)**. Si
+requisan el disco, la DB es ilegible sin la clave. Se lee al arrancar y **nunca**
+se escribe en disco.
+
+```bash
+# Genérala una vez y guárdala FUERA del disco de datos (secreto de Docker / gestor de contraseñas)
+openssl rand -hex 32
+```
+
+> ⚠️ **Perder `SECURECHAT_DB_KEY` deja la DB irrecuperable.**
+> En el primer arranque con clave, una DB plana existente se migra a cifrada y se
+> deja un `data.db.plaintext.bak` — **bórralo de forma segura**
+> (`shred -u data/data.db.plaintext.bak`) o el texto plano sigue legible.
+
+#### Despliegue de producción recomendado
+
+```bash
+docker run -d --name securechat-server \
+  -e SECURECHAT_JWT_SECRET="$(openssl rand -hex 32)" \
+  -e SECURECHAT_DB_KEY="$(openssl rand -hex 32)" \
+  -e SECURECHAT_TLS=true \
+  -e SECURECHAT_TLS_CERT=/data/fullchain.pem \
+  -e SECURECHAT_TLS_KEY=/data/privkey.pem \
+  -p 8443:8443 -v "$PWD/data:/data" \
+  ghcr.io/letzzar/securechat-server:latest
+```
 
 ### Publicar la imagen
 
