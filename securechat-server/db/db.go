@@ -3,50 +3,38 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"log"
+	"net/url"
 	"os"
 	"strings"
-	"sync"
 
-	sqlite3 "github.com/mutecomm/go-sqlcipher/v4"
+	_ "github.com/mutecomm/go-sqlcipher/v4"
 )
-
-var registerEnc sync.Once
 
 // Open opens the SQLite database. When [key] is non-empty the database is
 // encrypted at rest with SQLCipher (AES-256); the key is supplied at startup
 // (SECURECHAT_DB_KEY) and never stored on disk. A pre-existing plaintext DB is
 // migrated to encrypted transparently (a .plaintext.bak is kept).
 func Open(path, key string) (*sql.DB, error) {
+	// Trim surrounding whitespace/newlines: a key sourced from an env var, a
+	// Docker secret or an .env file often carries a trailing newline, which
+	// would silently change the key and make the DB undecryptable.
+	key = strings.TrimSpace(key)
+
+	dsn := path + "?_journal_mode=WAL&_foreign_keys=on"
 	if key != "" {
-		esc := strings.ReplaceAll(key, "'", "''")
-		registerEnc.Do(func() {
-			sql.Register("sqlite3-enc", &sqlite3.SQLiteDriver{
-				ConnectHook: func(conn *sqlite3.SQLiteConn) error {
-					// PRAGMA key MUST be the first statement on the connection,
-					// before any other pragma or query, or SQLCipher can't set up.
-					if _, err := conn.Exec(fmt.Sprintf("PRAGMA key = '%s';", esc), nil); err != nil {
-						return err
-					}
-					if _, err := conn.Exec("PRAGMA journal_mode=WAL;", nil); err != nil {
-						return err
-					}
-					_, err := conn.Exec("PRAGMA foreign_keys=ON;", nil)
-					return err
-				},
-			})
-		})
-		if err := ensureEncrypted(path, esc); err != nil {
+		// Apply the SQLCipher key through the DSN (_pragma_key). The driver runs
+		// `PRAGMA key` at the C level right after opening the connection — before
+		// the pager reads the first page — which is the only reliable place to set
+		// it. Doing it later via a ConnectHook produces a DB that encrypts on
+		// create but cannot be reopened ("file is not a database").
+		dsn = path + "?_pragma_key=" + url.QueryEscape(key) + "&_journal_mode=WAL&_foreign_keys=on"
+		if err := ensureEncrypted(path, strings.ReplaceAll(key, "'", "''")); err != nil {
 			return nil, err
 		}
 	}
 
-	var database *sql.DB
-	var err error
-	if key != "" {
-		database, err = sql.Open("sqlite3-enc", path) // pragmas applied in the hook
-	} else {
-		database, err = sql.Open("sqlite3", path+"?_journal_mode=WAL&_foreign_keys=on")
-	}
+	database, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -56,8 +44,11 @@ func Open(path, key string) (*sql.DB, error) {
 	if key != "" {
 		if _, err := database.Exec("SELECT count(*) FROM sqlite_master"); err != nil {
 			database.Close()
-			return nil, fmt.Errorf("cannot open encrypted DB (wrong SECURECHAT_DB_KEY?): %w", err)
+			return nil, fmt.Errorf("cannot open encrypted database %s with the provided SECURECHAT_DB_KEY: %w. "+
+				"The file is either encrypted with a different key or corrupt. "+
+				"Check the key has no stray quotes/whitespace, and if a %s.plaintext.bak exists you can restore it and let the migration run again", path, err, path)
 		}
+		log.Printf("database: opened %s (encrypted at rest, SQLCipher AES-256)", path)
 	}
 
 	if err := migrate(database); err != nil {
@@ -81,10 +72,14 @@ func ensureEncrypted(path, escKey string) error {
 	}
 	if _, err := pdb.Exec("SELECT count(*) FROM sqlite_master"); err != nil {
 		pdb.Close()
-		return nil // already encrypted (or unreadable) — leave it to the keyed open
+		// Not readable as plaintext: it is already encrypted (or corrupt). Do not
+		// migrate — the keyed open will decrypt it if the key matches.
+		log.Printf("database: %s is not plaintext — assuming already encrypted; opening with the provided key", path)
+		return nil
 	}
 
 	// Plaintext → export into an encrypted copy, then swap files.
+	log.Printf("database: %s is plaintext — migrating to encrypted at rest (SQLCipher AES-256)…", path)
 	encPath := path + ".enc"
 	os.Remove(encPath)
 	escEnc := strings.ReplaceAll(encPath, "'", "''")
@@ -106,6 +101,7 @@ func ensureEncrypted(path, escKey string) error {
 	if err := os.Rename(encPath, path); err != nil {
 		return fmt.Errorf("db migrate swap: %w", err)
 	}
+	log.Printf("database: migration complete — encrypted DB in place; plaintext backup kept at %s.plaintext.bak (delete it once you have verified the server works)", path)
 	return nil
 }
 

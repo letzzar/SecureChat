@@ -7,6 +7,19 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ## [Unreleased]
 
+### Fixed
+- **Encryption at rest was unusable after the first start.** The SQLCipher key
+  was applied via a `database/sql` ConnectHook (`PRAGMA key`), which encrypts a
+  freshly created DB but produces a file that **cannot be reopened** — every
+  later start (and every Docker restart) failed with `file is not a database`.
+  The key is now applied through the driver DSN (`_pragma_key`), which sets it
+  at the C level before the pager reads the first page. Create, migrate and
+  reopen across processes now all work (verified end-to-end, data preserved).
+- The DB key is now **trimmed** (`TrimSpace`) before use, so a trailing newline
+  or stray spaces from an env var / Docker secret / `.env` no longer silently
+  change the key. Migration now logs clearly (plaintext→encrypted, backup path)
+  and a wrong-key open returns an actionable error pointing at `.plaintext.bak`.
+
 ---
 
 ## v0.7.0 — 2026-07-10 — Public rooms, room federation (F1–F4), encryption at rest
