@@ -7,6 +7,10 @@ Dates in ISO 8601 (YYYY-MM-DD). Entries ordered newest first.
 
 ## [Unreleased]
 
+---
+
+## v0.7.1 — 2026-07-12 — Fix: encryption at rest reopen
+
 ### Fixed
 - **Encryption at rest was unusable after the first start.** The SQLCipher key
   was applied via a `database/sql` ConnectHook (`PRAGMA key`), which encrypts a
