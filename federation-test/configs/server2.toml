@@ -1,0 +1,16 @@
+# SecureChat — nodo 2 de la federación de prueba (nodo intermedio del mesh).
+[server]
+host = "0.0.0.0"
+port = 8443
+tls  = false
+mode = "mesh_public"
+
+[jwt]
+secret   = "jwt-node2-65ec38543a3ef6459798adb9f2297e0a25a7f2fb"
+ttl_days = 30
+
+[federation]
+secret      = "2f8441b48c69b566e2e28f9db0511ace"
+admin_token = "d1bbadd26323394f50fbfd74a3cc4406"
+public_url  = "http://securechat-2:8443"
+name        = "Nodo 2"

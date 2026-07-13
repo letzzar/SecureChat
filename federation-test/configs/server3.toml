@@ -1,0 +1,16 @@
+# SecureChat — nodo 3 de la federación de prueba (Alice se conecta aquí).
+[server]
+host = "0.0.0.0"
+port = 8443
+tls  = false
+mode = "mesh_public"
+
+[jwt]
+secret   = "jwt-node3-c9a33c35477f35a4be4573788c7c8db2c37bd003"
+ttl_days = 30
+
+[federation]
+secret      = "2f8441b48c69b566e2e28f9db0511ace"
+admin_token = "d1bbadd26323394f50fbfd74a3cc4406"
+public_url  = "http://securechat-3:8443"
+name        = "Nodo 3"

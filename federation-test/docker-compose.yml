@@ -1,0 +1,59 @@
+# SecureChat — federación de prueba de 3 nodos (malla).
+#
+# Topología:
+#   Bob   -> Nodo 1  (http://<HOST>:8451)
+#   (Nodo 2 = nodo intermedio de la malla, http://<HOST>:8452)
+#   Alice -> Nodo 3  (http://<HOST>:8453)
+#
+# Los 3 contenedores se ven entre sí por nombre DNS interno (securechat-1/2/3)
+# en la red de Compose; ese nombre es el que va en federation.public_url de cada
+# config y con el que se enlazan como peers (wire-mesh.sh).
+#
+# Uso local / en Synology DSM (Container Manager -> Proyecto -> import de este
+# archivo). Arranca con:
+#   docker compose up -d
+#   ./wire-mesh.sh           # enlaza la malla (idempotente)
+# En DSM: ejecuta wire-mesh.sh desde una tarea/terminal, o registra los peers a
+# mano con los curl que contiene (ver README.md).
+
+services:
+  securechat-1:
+    image: ghcr.io/letzzar/securechat-server:v0.7.1
+    container_name: securechat-1
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+    ports:
+      - "8451:8443"
+    volumes:
+      - ./configs/server1.toml:/data/config.toml:ro
+      - s1data:/data
+
+  securechat-2:
+    image: ghcr.io/letzzar/securechat-server:v0.7.1
+    container_name: securechat-2
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+    ports:
+      - "8452:8443"
+    volumes:
+      - ./configs/server2.toml:/data/config.toml:ro
+      - s2data:/data
+
+  securechat-3:
+    image: ghcr.io/letzzar/securechat-server:v0.7.1
+    container_name: securechat-3
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+    ports:
+      - "8453:8443"
+    volumes:
+      - ./configs/server3.toml:/data/config.toml:ro
+      - s3data:/data
+
+volumes:
+  s1data:
+  s2data:
+  s3data:
